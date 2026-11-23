@@ -32,16 +32,19 @@
   --warn: #B5732A;
   --success: #2E7D43;
 
+  /* Dynamic scaling factor */
+  --ui-scale: 1;
+
   /* Type */
   --font-display: "Fraunces", "New York", "Charter", Georgia, serif;
   --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
   --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace;
   --font-system: var(--font-body);
 
-  --label-size: 11px;
-  --body-size: 13px;
-  --title-size: 16px;
-  --small-size: 11px;
+  --label-size: calc(11px * var(--ui-scale));
+  --body-size: calc(13px * var(--ui-scale));
+  --title-size: calc(16px * var(--ui-scale));
+  --small-size: calc(11px * var(--ui-scale));
 
   /* Radii — sharper, more deliberate */
   --r-xs: 2px;

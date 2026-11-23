@@ -543,10 +543,10 @@ export function PromptEditor() {
           style={{
             width: '100%',
             boxSizing: 'border-box',
-            height: 290,                                   // matches .ce-stage
+            height: '100%',
             overflowY: 'auto',
-            padding: '16px 18px 16px 18px',
-            paddingRight: 110,                             // 给右下角悬浮 Generate 按钮腾位置
+            padding: 'calc(14px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1))',
+            paddingRight: 'calc(110px * var(--ui-scale, 1))',
             color: 'var(--text-1)',
             background: 'var(--bg-card)',
             border: '1px solid var(--line-strong)',

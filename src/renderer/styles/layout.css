@@ -87,16 +87,18 @@ body {
 
 /* Sidebar: warm tint with paper grain. Slight inner shadow on the right edge. */
 .sidebar {
-  width: 280px;
-  flex: 0 0 280px;
+  width: calc(280px * var(--ui-scale, 1));
+  flex: 0 0 calc(280px * var(--ui-scale, 1));
+  min-width: 230px;
+  max-width: 380px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 100%),
     var(--bg-paper-tint);
   border-right: 1px solid var(--line);
-  padding: 8px 22px 28px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1)) calc(24px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: calc(16px * var(--ui-scale, 1));
   overflow-y: auto;
   position: relative;
 }
@@ -110,7 +112,7 @@ body {
 }
 
 /* Main: paper with faint vertical guides every 240px.
-   NO vertical scroll — entire window must fit in 820px viewport. */
+   NO vertical scroll — proportional grid ensures perfect fit in any viewport. */
 .main {
   flex: 1;
   background: var(--bg-page);
@@ -125,13 +127,14 @@ body {
       rgba(26, 24, 21, 0.025) 240px
     );
   background-size: 9px 9px, 11px 11px, auto;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: minmax(0, 44fr) minmax(0, 56fr);
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   position: relative;
-  padding: 12px 22px 16px;
-  gap: 12px;
+  padding: calc(12px * var(--ui-scale, 1)) calc(22px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
+  gap: calc(14px * var(--ui-scale, 1));
 }
 
 /* Common: uppercase small label, like a darkroom equipment label */
@@ -140,14 +143,14 @@ body {
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   letter-spacing: var(--track-loose);
   text-transform: uppercase;
   color: var(--text-3);
   font-weight: 500;
   margin-bottom: 0;
-  padding: 6px 0;
-  min-height: 24px;
+  padding: calc(4px * var(--ui-scale, 1)) 0;
+  min-height: calc(24px * var(--ui-scale, 1));
   box-sizing: border-box;
 }
 .eyebrow::before {
@@ -177,64 +180,52 @@ body {
 }
 
 /* ---------- Main pane: top row = editor + templates ----------
-   Both columns share the row height (driven by the templates TOC).
-   The prompt editor and ce-stage stretch to fill the editor column,
-   so the prompt box's bottom edge lines up with the TOC's bottom edge. */
+   Both columns share the row height, stretching proportionally with window. */
 .main-row-top {
   display: grid;
-  /* 流式自适应：编辑器吃掉所有剩余宽度，右列在 170~210px 间浮动。
-     窗口拉大时两列一起变宽，不再留空；字体字号保持不变。 */
-  grid-template-columns: minmax(0, 1fr) minmax(170px, 210px);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(calc(170px * var(--ui-scale, 1)), calc(230px * var(--ui-scale, 1)));
+  gap: calc(16px * var(--ui-scale, 1));
   align-items: stretch;
-  flex: 0 0 auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .main-row-bottom {
   display: grid;
-  /* 流式自适应：两列等分剩余宽度（不再是写死的 400px+400px + 左对齐留空）。
-     高度由 flex: 1 吃掉窗口剩余纵空间：Output 正方形边长取
-     min(列宽, 行高)（PreviewBox 用 ResizeObserver 实测），
-     Archive 列表 flex:1 + 内部滚动，保证两区顶部永远对齐。 */
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
+  gap: calc(16px * var(--ui-scale, 1));
   align-items: stretch;
-  flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
 }
 
 .editor-col {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   position: relative;
 }
 .templates-col {
   border-left: 1px solid var(--rule);
-  padding-left: 14px;
+  padding-left: calc(14px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
 }
 
 /* ---------- Print + Archive columns ----------
-   Both columns share identical structure: a header row + a stretched box.
-   流式自适应（窗口任意缩放都不乱）：
-     - print-frame 不再是写死的 400×400：边长由 PreviewBox 实测
-       列宽×行高后取 min，保证永远是“当前空间里最大的正方形”，
-       顶部永远和 Archive 列表顶部对齐。
-     - archive-list flex:1 吃掉列内剩余高度 + 内部滚动，
-       历史再长也不把底边撑下去。
-   Mechanics: .main-row-bottom is a grid with `align-items: stretch`, so both
-   columns are already row-height tall. Each column is a flex column where the
-   header takes its intrinsic height and the box takes the rest (`flex: 1`
-   + `min-height: 0`). archive-list additionally scrolls internally
-   (`overflow: auto`) so long histories never push the bottom edge down. */
+   Both columns share identical structure: a header row + a stretched box. */
 .print-col {
   display: flex;
   flex-direction: column;
   gap: 0;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   align-self: stretch;
 }
 .archive-col {
@@ -242,6 +233,8 @@ body {
   flex-direction: column;
   gap: 0;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   align-self: stretch;
 }
 .print-col .print,
@@ -250,6 +243,7 @@ body {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
   width: 100%;
 }
 /* Headers pin to the top … */
@@ -263,14 +257,15 @@ body {
   flex: 1 1 auto;
   width: 100%;
   height: 100%;
-  min-height: 240px;
+  min-height: 180px;
   max-width: 100%;
   position: relative;
 }
 .archive-col .archive-list {
   margin-top: 0;
   flex: 1 1 auto;
-  min-height: 240px;
+  min-height: 180px;
+  height: 100%;
   overflow: auto;
 }
 

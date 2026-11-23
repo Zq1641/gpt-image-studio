@@ -292,15 +292,18 @@ input:focus {
 /* ---------- contentEditable 提示词编辑器 ---------- */
 .ce-wrap {
   position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 .ce-stage {
   position: relative;
   width: 100%;
-  /* Fixed height matches the templates TOC (5 items × ~57px ≈ 285px),
-     plus the 24px eyebrow + gaps so the prompt box's bottom edge lines up
-     with the TOC's bottom edge. ce-action floats on top — no flow space. */
-  height: 290px;
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   background: var(--bg-card);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
@@ -314,8 +317,8 @@ input:focus {
 }
 .ce-action {
   position: absolute;
-  right: 10px;
-  bottom: 10px;
+  right: calc(10px * var(--ui-scale, 1));
+  bottom: calc(10px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   gap: 6px;
@@ -324,7 +327,7 @@ input:focus {
 .ce-editor {
   outline: none;
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: calc(15px * var(--ui-scale, 1));
   line-height: 1.55;
   letter-spacing: 0.005em;
   color: var(--text-1);
@@ -718,6 +721,9 @@ input:focus {
 .toc {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   gap: 0;
   margin-top: 2px;
   border-top: 1px solid var(--rule);
@@ -725,10 +731,10 @@ input:focus {
 .toc-item {
   appearance: none;
   display: grid;
-  grid-template-columns: 28px 1fr;
-  gap: 8px;
+  grid-template-columns: calc(28px * var(--ui-scale, 1)) 1fr;
+  gap: calc(8px * var(--ui-scale, 1));
   align-items: baseline;
-  padding: 12px 0;
+  padding: calc(10px * var(--ui-scale, 1)) 0;
   border: 0;
   border-bottom: 1px solid var(--rule);
   background: transparent;

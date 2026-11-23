@@ -1,9 +1,12 @@
 import { PromptEditor } from './PromptEditor'
-import { TemplatePills } from './TemplatePills'
+import { SkillPicker } from './SkillPicker'
 import { PreviewBox } from './PreviewBox'
 import { HistoryPanel } from './HistoryPanel'
+import { useComposer } from '../state/useComposer'
 
 export function MainPane() {
+  const { state } = useComposer()
+  const skillCount = state.settings.skills?.length ?? 0
   return (
     <main className="main">
       <section className="main-row-top">
@@ -15,10 +18,10 @@ export function MainPane() {
         </div>
         <div className="templates-col">
           <div className="eyebrow">
-            <span>Presets</span>
-            <span style={{ marginLeft: 'auto', color: 'var(--text-3)' }}>5</span>
+            <span>Skills</span>
+            <span style={{ marginLeft: 'auto', color: 'var(--text-3)' }}>{skillCount}</span>
           </div>
-          <TemplatePills />
+          <SkillPicker />
         </div>
       </section>
 

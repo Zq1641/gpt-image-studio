@@ -1,0 +1,2764 @@
+{
+  all: [
+    '/Users/pony/gpt-image-2生图工具/src/cli/gen.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/api.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/cost.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/headless.test.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/history.test.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/history.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/index.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/normalize.test.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/normalize.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/p0-security.test.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/presets.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/protocol.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/queue.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/secret.ts',
+    '/Users/pony/gpt-image-2生图工具/src/main/settings.ts',
+    '/Users/pony/gpt-image-2生图工具/src/mcp/server.ts',
+    '/Users/pony/gpt-image-2生图工具/src/preload/index.ts',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/App.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/AspectSelect.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/CacheModal.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/CountStepper.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/GenerateButton.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/HistoryPanel.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/MainPane.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/ModelDisplay.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/PresetPicker.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/PreviewBox.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/PromptEditor.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/RefImageUploader.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/ResolutionSegments.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/SettingsModal.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/Sidebar.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/SkillPicker.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/TemplatePills.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/components/__tests__/skillAt.test.ts',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/data/templates.ts',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/env.d.ts',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/lib/imageFile.ts',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/lib/refTokens.ts',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/lib/skillTokens.ts',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/main.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/renderer/state/useComposer.tsx',
+    '/Users/pony/gpt-image-2生图工具/src/shared/headless-schema.ts',
+    '/Users/pony/gpt-image-2生图工具/src/shared/ipc.ts',
+    '/Users/pony/gpt-image-2生图工具/src/shared/size.test.ts',
+    '/Users/pony/gpt-image-2生图工具/src/shared/size.ts',
+    '/Users/pony/gpt-image-2生图工具/src/shared/skills.ts',
+    '/Users/pony/gpt-image-2生图工具/src/shared/types.ts'
+  ]
+}{
+  file: 'cli/gen.ts',
+  len: 4627,
+  snippet: '#!/usr/bin/env node\n' +
+    '// CLI 薄封装（唯一核心在 src/shared/headless-schema.ts）\n' +
+    '// 职责只有三件：解析 argv -> 交给单核心校验/组装 -> 走共用 FIFO 串行发请求并落盘。\n' +
+    "import axios from 'axios'\n" +
+    "import { mkdirSync, writeFileSync } from 'node:fs'\n" +
+    "import { join } from 'node:path'\n" +
+    "import { parseHeadlessParams, buildImageBody, estimatePayloadBytes } from '../shared/headless-schema'\n" +
+    "import type { PresetLike } from '../shared/headless-schema'\n" +
+    "import { generateQueue } from '../main/queue'\n" +
+    "import { costPreview } from '../main/cost'\n" +
+    '\n' +
+    'const MAX_PAYLOAD_BYTES = 20 * 1024 * 1024\n' +
+    '\n' +
+    'function argValue(name: string): string | undefined {\n' +
+    "  const i = process.argv.indexOf('--' + name)\n" +
+    '  if (i < 0) return undefined\n' +
+    '  return process.argv[i + 1]\n' +
+    '}\n' +
+    '\n' +
+    'function flag(name: string): boolean {\n' +
+    "  return process.argv.includes('--' + name)\n" +
+    '}\n' +
+    '\n' +
+    'function collectImages(): string[] {\n' +
+    '  const out: string[] = []\n' +
+    '  for (let i = 0; i < process.argv.length; i += 1) {\n' +
+    "    if (process.argv[i] !== '--image') continue\n" +
+    '    const v = process.argv[i + 1]\n' +
+    "    if (typeof v === 'string' && v.length > 0) out.push(v)\n" +
+    '  }\n' +
+    '  return out\n' +
+    '}\n' +
+    '\n' +
+    'function extractB64(raw: unknown): string[] {\n' +
+    '  const out: string[] = []\n' +
+    "  if (!raw || typeof raw !== 'object') return out\n" +
+    '  const root = raw as Record<string, unknown>\n' +
+    "  const data = root['data']\n" +
+    '  if (Array.isArray(data)) {\n' +
+    '    for (const item of data) {\n' +
+    "      if (!item || typeof item !== 'object') continue\n" +
+    "      const b64 = (item as Record<string, unknown>)['b64_json']\n" +
+    "      if (typeof b64 === 'string' && b64.length > 0) out.push(b64)\n" +
+    '    }\n' +
+    '  }\n' +
+    "  const top = root['b64_json']\n" +
+    "  if (typeof top === 'string' && top.length > 0) out.push(top)\n" +
+    '  else if (Array.isArray(top)) {\n' +
+    '    for (const v of top) {\n' +
+    "      if (typeof v === 'string' && v.length > 0) out.push(v)\n" +
+    '    }\n' +
+    '  }\n' +
+    '  return out\n' +
+    '}\n' +
+    '\n' +
+    'async function main(): Promise<void> {\n' +
+    "  const model = argValue('model') ?? process.env['GPT_IMAGE_MODEL'] ?? 'gpt-image-2'\n" +
+    "  const countArg = argValue('count')\n" +
+    '  const parsed = parseHeadlessParams(\n' +
+    '    {\n' +
+    "      prompt: argValue('prompt') ?? process.env['GPT_IMAGE_PROMPT'] ?? '',\n" +
+    "      aspect: argValue('aspect'),\n" +
+    "      resolution: argValue('resolution'),\n" +
+    "      quality: argValue('quality'),\n" +
+    '      count: countArg === undefined ? undefined : Number(countArg),\n' +
+    '      images: collectImages(),\n' +
+    "      complexity: argValue('complexity'),\n" +
+    "      size: argValue('size'),\n" +
+    '      model: model,\n' +
+    '    },\n' +
+    '    model,\n' +
+    '  )\n' +
+    '  if (!parsed.ok) {\n' +
+    "    console.error('ERR ' + parsed.message)\n" +
+    '    process.exitCode = 2\n' +
+    '    return\n' +
+    '  }\n' +
+    '  const params = parsed.params\n' +
+    '  const payloadBytes = estimatePayloadBytes(params.images)\n' +
+    '  if (payloadBytes > MAX_PAYLOAD_BYTES) {\n' +
+    "    console.error('ERR 参考图总体积 ' + (payloadBytes / 1024 / 1024).toFixed(1) + 'MB 过大（建议不超过 20MB）')\n" +
+    '    process.exitCode = 2\n' +
+    '    return\n' +
+    '  }\n' +
+    '\n' +
+    '  const preset: PresetLike = {\n' +
+    '    model: model,\n' +
+    "    imageFieldName: 'image',\n" +
+    "    sizeMode: 'computed',\n" +
+    "    sendAspectRatio: !flag('no-aspect'),\n" +
+    '  }\n' +
+    '  const body = buildImageBody(params, preset, params.prompt)\n' +
+    "  const price = Number(process.env['GPT_IMAGE_PRICE'] ?? '0')\n" +
+    '  console.info(costPreview(params.count, Number.isFinite(price) ? price : 0))\n' +
+    '  console.info(JSON.stringify(body, null, 2))\n' +
+    '\n' +
+    "  const baseUrl = (argValue('baseUrl') ?? process.env['GPT_IMAGE_BASE_URL'] ?? '').replace(/\\/$/, '')\n" +
+    "  const apiKey = «redacted 8 chars»('apiKey') ?? process.env['GPT_IMAGE_API_KEY'] ?? ''\n" +
+    "  if (flag('dry-run') || !baseUrl || !apiKey) {\n" +
+    "    if (!flag('dry-run')) console.info('未配置 baseUrl/apiKey，仅输出请求体（dry-run）')\n" +
+    '    return\n' +
+    '  }\n' +
+    '\n' +
+    "  const timeoutRaw = Number(process.env['GPT_IMAGE_TIMEOUT_MS'] ?? '600000')\n" +
+    '  const timeoutMs = Number.isFinite(timeoutRaw) ? timeoutRaw : 600000\n' +
+    '  const data = await generateQueue.enqueue(async () => {\n' +
+    "    const resp = await axios.post(baseUrl + '/v1/images/generations', body, {\n" +
+    "      headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },\n" +
+    '      timeout: timeoutMs,\n' +
+    '      maxBodyLength: Infinity,\n' +
+    '      maxContentLength: Infinity,\n' +
+    "      responseType: 'json',\n" +
+    '    })\n' +
+    '    return resp.data as unknown\n' +
+    '  })\n' +
+    '\n' +
+    '  const items = extractB64(data)\n' +
+    '  if (items.length === 0) {\n' +
+    "    console.error('ERR 未能从响应中识别到图片数据（b64_json）')\n" +
+    '    process.exitCode = 3\n' +
+    '    return\n' +
+    '  }\n' +
+    "  const outDir = argValue('out') ?? process.env['GPT_IMAGE_OUT'] ?? join(process.cwd(), 'output')\n" +
+    '  mkdirSync(outDir, { recursive: true })\n' +
+    '  const stamp = Date.now()\n' +
+    '  items.forEach((b64, index) => {\n' +
+    "    const file = join(outDir, stamp + '-' + index + '.png')\n" +
+    "    writeFileSync(file, Buffer.from(b64, 'base64'))\n" +
+    "    console.info('saved ' + file)\n" +
+    '  })\n' +
+    '}\n' +
+    '\n' +
+    'main().catch((e: unknown) => {\n' +
+    '  const msg = e instanceof Error ? e.message : String(e)\n' +
+    "  console.error('ERR ' + msg)\n" +
+    '  process.exitCode = 1\n' +
+    '})\n'
+}{
+  file: 'main/api.ts',
+  len: 4534,
+  snippet: "import axios, { type AxiosError, type AxiosResponse } from 'axios'\n" +
+    "import type { GenerateRequest, GenerateResult } from '../shared/types'\n" +
+    "import { loadSettings } from './settings'\n" +
+    "import { activePreset } from './presets'\n" +
+    "import { normalizeResponse } from './normalize'\n" +
+    "import { generateQueue } from './queue'\n" +
+    '\n' +
+    'const CONTROLLERS = new Map<string, AbortController>()\n' +
+    '// FIFO串行：所有生成请求经 generateQueue.enqueue 排队，与 CLI / MCP 同队列语义。\n' +
+    '\n' +
+    'function bodySnippet(s: string): string {\n' +
+    "  return s.length > 2000 ? s.slice(0, 2000) + '…' : s\n" +
+    '}\n' +
+    '\n' +
+    'export async function generate(req: GenerateRequest): Promise<GenerateResult> {\n' +
+    '  const settings = loadSettings()\n' +
+    '  const preset = activePreset(settings)\n' +
+    "  if (!preset.baseUrl) return { ok: false, code: 'config', message: '当前预设未配置 API Base URL，请到设置中编辑预设' }\n" +
+    "  if (!preset.apiKey) return { ok: false, code: 'config', message: '当前预设未配置 API Key，请到设置中编辑预设' }\n" +
+    '\n' +
+    '  const payloadBytes = req.images.reduce((sum, s) => sum + Math.floor(s.length * 0.75), 0)\n' +
+    '  if (payloadBytes > 20 * 1024 * 1024) {\n' +
+    "    return { ok: false, code: 'payload', message: `参考图总体积 ${(payloadBytes / 1024 / 1024).toFixed(1)}MB 过大（建议 ≤ 20MB）` }\n" +
+    '  }\n' +
+    '\n' +
+    '  const body: Record<string, unknown> = {\n' +
+    '    model: preset.model,\n' +
+    '    prompt: req.promptResolved,\n' +
+    '    n: req.params.count,\n' +
+    "    ...(req.params.quality !== 'auto' ? { quality: req.params.quality } : {}),\n" +
+    '  }\n' +
+    "  const { sizeString } = await import('../shared/size')\n" +
+    '  const size = sizeString(req.params.aspect, req.params.resolution, preset.sizeMode)\n' +
+    '  if (size) body.size = size\n' +
+    '  if (preset.sendAspectRatio) body.aspect_ratio = req.params.aspect\n' +
+    '  if (req.images.length > 0) {\n' +
+    '    const v = req.images.length === 1 ? req.images[0] : req.images\n' +
+    '    body[preset.imageFieldName] = v\n' +
+    '  }\n' +
+    '\n' +
+    '  const url = `${preset.baseUrl}/v1/images/generations`\n' +
+    '\n' +
+    "  console.log('[generate] enqueue', req.requestId, 'queueDepth=', generateQueue.pending())\n" +
+    "  console.log('[file] protocol check images=', req.images.length, 'job_id=', req.requestId)\n" +
+    '  return generateQueue.enqueue(async (): Promise<GenerateResult> => {\n' +
+    "    console.log('[generate] dequeue start', req.requestId)\n" +
+    "    console.log('[job] start job_id=', req.requestId, 'model=', preset.model, 'count=', req.params.count)\n" +
+    '    let lastErr: unknown = null\n' +
+    '    for (let attempt = 1; attempt <= 3; attempt++) {\n' +
+    "      console.log('[job] attempt', attempt + '/3', req.requestId)\n" +
+    '      const ctrl = new AbortController()\n' +
+    '      CONTROLLERS.set(req.requestId, ctrl)\n' +
+    '      try {\n' +
+    '        const resp: AxiosResponse = await axios.post(url, body, {\n' +
+    '          headers: {\n' +
+    '            Authorization: `Bearer ${preset.apiKey}`,\n' +
+    "            'Content-Type': 'application/json',\n" +
+    '          },\n' +
+    '          timeout: settings.timeoutMs,\n' +
+    '          maxBodyLength: Infinity,\n' +
+    '          maxContentLength: Infinity,\n' +
+    '          signal: ctrl.signal,\n' +
+    "          responseType: 'json',\n" +
+    '        })\n' +
+    '        const r = await normalizeResponse(req, resp.data)\n' +
+    "        console.log('[generate] done', req.requestId, r.ok ? 'ok' : (r as { code?: string }).code)\n" +
+    '        return r\n' +
+    '      } catch (e) {\n' +
+    '        const ax = e as AxiosError\n' +
+    "        if (ax.name === 'CanceledError' || ax.code === 'ERR_CANCELED') {\n" +
+    "          console.log('[generate] canceled', req.requestId)\n" +
+    "          return { ok: false, code: 'canceled', message: '已取消' }\n" +
+    '        }\n' +
+    "        if (ax.code === 'ECONNABORTED') {\n" +
+    "          console.log('[generate] timeout', req.requestId)\n" +
+    '          lastErr = e\n' +
+    "          console.log('[job] retry', req.requestId, 'attempt', attempt)\n" +
+    '          continue\n' +
+    '        }\n' +
+    '        if (ax.response) {\n' +
+    '          const status = ax.response.status\n' +
+    '          const data = ax.response.data\n' +
+    "          const bodyStr = typeof data === 'string' ? data : (() => { try { return JSON.stringify(data) } catch { return String(data) } })()\n" +
+    "          console.log('[generate] http', req.requestId, status, bodySnippet(bodyStr).slice(0, 200))\n" +
+    "          return { ok: false, code: 'http', status, message: `HTTP ${status}`, body: bodySnippet(bodyStr) }\n" +
+    '        }\n' +
+    "        console.log('[generate] network error', req.requestId, ax.message)\n" +
+    '        lastErr = e\n' +
+    "        console.log('[job] retry', req.requestId, 'attempt', attempt)\n" +
+    '        continue\n' +
+    '      } finally {\n' +
+    '        CONTROLLERS.delete(req.requestId)\n' +
+    '      }\n' +
+    '    }\n' +
+    "    return { ok: false, code: 'network', message: (lastErr as Error)?.message || '网络错误（已重试3次）' }\n" +
+    '  })\n' +
+    '}\n' +
+    '\n' +
+    'export function cancel(requestId: string): void {\n' +
+    '  const c = CONTROLLERS.get(requestId)\n' +
+    '  if (c) {\n' +
+    '    c.abort()\n' +
+    '    CONTROLLERS.delete(requestId)\n' +
+    '  }\n' +
+    "  console.log('[generate] cancel requested', requestId)\n" +
+    '}\n'
+}{
+  file: 'main/headless.test.ts',
+  len: 6689,
+  snippet: "import { describe, expect, it } from 'vitest'\n" +
+    'import {\n' +
+    '  parseHeadlessParams,\n' +
+    '  buildImageBody,\n' +
+    '  estimatePayloadBytes,\n' +
+    '  isAspect,\n' +
+    '  isResolution,\n' +
+    '  isCount,\n' +
+    "} from '../shared/headless-schema'\n" +
+    "import type { PresetLike } from '../shared/headless-schema'\n" +
+    "import { FifoQueue } from './queue'\n" +
+    "import { costPreview, estimateCost, formatCNY } from './cost'\n" +
+    '\n' +
+    'const legacyPreset: PresetLike = {\n' +
+    "  model: 'gpt-image-2',\n" +
+    "  imageFieldName: 'image',\n" +
+    "  sizeMode: 'computed',\n" +
+    '  sendAspectRatio: true,\n' +
+    '}\n' +
+    '\n' +
+    'const flarePreset: PresetLike = {\n' +
+    "  model: 'gpt-image-2.6-flare',\n" +
+    "  imageFieldName: 'image',\n" +
+    "  sizeMode: 'computed',\n" +
+    '  sendAspectRatio: true,\n' +
+    '}\n' +
+    '\n' +
+    "describe('headless-schema — 参数校验（CLI/MCP/Electron 唯一入口）', () => {\n" +
+    "  it('prompt 为空直接拒绝', () => {\n" +
+    "    const r = parseHeadlessParams({ prompt: '   ' })\n" +
+    '    expect(r.ok).toBe(false)\n' +
+    '  })\n' +
+    '\n' +
+    "  it('缺省值：1:1 + auto + medium + 1 张', () => {\n" +
+    "    const r = parseHeadlessParams({ prompt: '一只猫' })\n" +
+    '    expect(r.ok).toBe(true)\n' +
+    '    if (!r.ok) return\n' +
+    "    expect(r.params.aspect).toBe('1:1')\n" +
+    "    expect(r.params.resolution).toBe('auto')\n" +
+    "    expect(r.params.quality).toBe('medium')\n" +
+    '    expect(r.params.count).toBe(1)\n' +
+    '    expect(r.params.images).toEqual([])\n' +
+    '  })\n' +
+    '\n' +
+    "  it('老四模型不收 xhigh/max，2.6 收六档', () => {\n" +
+    "    expect(parseHeadlessParams({ prompt: 'x', quality: 'max' }, 'gpt-image-2').ok).toBe(false)\n" +
+    "    expect(parseHeadlessParams({ prompt: 'x', quality: 'xhigh' }, 'dall-e-3').ok).toBe(false)\n" +
+    "    expect(parseHeadlessParams({ prompt: 'x', quality: 'max' }, 'gpt-image-2.6-sunburst').ok).toBe(true)\n" +
+    "    expect(parseHeadlessParams({ prompt: 'x', quality: 'xhigh' }, 'gpt-image-2.6-flare').ok).toBe(true)\n" +
+    '  })\n' +
+    '\n' +
+    "  it('非法枚举值一律拒绝', () => {\n" +
+    "    expect(parseHeadlessParams({ prompt: 'x', aspect: '5:4' }).ok).toBe(false)\n" +
+    "    expect(parseHeadlessParams({ prompt: 'x', resolution: '8K' }).ok).toBe(true)\n" +
+    "    expect(parseHeadlessParams({ prompt: 'x', count: 5 }).ok).toBe(false)\n" +
+    "    expect(parseHeadlessParams({ prompt: 'x', count: 0 }).ok).toBe(false)\n" +
+    "    expect(parseHeadlessParams({ prompt: 'x', images: ['ok', 1] }).ok).toBe(false)\n" +
+    '  })\n' +
+    '\n' +
+    "  it('WxH 与 1K/2K/4K 均放行', () => {\n" +
+    "    expect(isResolution('auto')).toBe(true)\n" +
+    "    expect(isResolution('4K')).toBe(true)\n" +
+    "    expect(isResolution('1536x1024')).toBe(true)\n" +
+    "    expect(isResolution('15x10x2')).toBe(false)\n" +
+    "    expect(isAspect('21:9')).toBe(true)\n" +
+    '    expect(isCount(4)).toBe(true)\n' +
+    '  })\n' +
+    '\n' +
+    "  it('complexity/size/model 原样透传', () => {\n" +
+    '    const r = parseHeadlessParams(\n' +
+    "      { prompt: 'x', complexity: 'highdetail', size: '1024x1024', model: 'gpt-image-2.6-flare' },\n" +
+    "      'gpt-image-2.6-flare',\n" +
+    '    )\n' +
+    '    expect(r.ok).toBe(true)\n' +
+    '    if (!r.ok) return\n' +
+    "    expect(r.params.complexity).toBe('highdetail')\n" +
+    "    expect(r.params.sizeOverride).toBe('1024x1024')\n" +
+    "    expect(r.params.modelOverride).toBe('gpt-image-2.6-flare')\n" +
+    '  })\n' +
+    '\n' +
+    "  it('prompt 超长拒绝（限 8000 字符）', () => {\n" +
+    "    const long = 'a'.repeat(8001)\n" +
+    '    expect(parseHeadlessParams({ prompt: long }).ok).toBe(false)\n' +
+    '  })\n' +
+    '})\n' +
+    '\n' +
+    "describe('headless-schema — 请求体组装', () => {\n" +
+    "  it('quality=auto 时不下发 quality 字段', () => {\n" +
+    "    const r = parseHeadlessParams({ prompt: 'x', quality: 'auto' })\n" +
+    '    expect(r.ok).toBe(true)\n' +
+    '    if (!r.ok) return\n' +
+    "    const body = buildImageBody(r.params, legacyPreset, 'x')\n" +
+    "    expect('quality' in body).toBe(false)\n" +
+    '  })\n' +
+    '\n' +
+    "  it('16:9 @ 2K 走计算尺寸，并带 aspect_ratio', () => {\n" +
+    "    const r = parseHeadlessParams({ prompt: 'x', aspect: '16:9', resolution: '2K' })\n" +
+    '    expect(r.ok).toBe(true)\n' +
+    '    if (!r.ok) return\n' +
+    "    const body = buildImageBody(r.params, legacyPreset, 'x')\n" +
+    "    expect(body['size']).toBe('2048x1152')\n" +
+    "    expect(body['aspect_ratio']).toBe('16:9')\n" +
+    "    expect(body['model']).toBe('gpt-image-2')\n" +
+    '  })\n' +
+    '\n' +
+    "  it('显式 size 覆盖自动计算', () => {\n" +
+    "    const r = parseHeadlessParams({ prompt: 'x', resolution: '4K', size: '1536x864' })\n" +
+    '    expect(r.ok).toBe(true)\n' +
+    '    if (!r.ok) return\n' +
+    "    const body = buildImageBody(r.params, legacyPreset, 'x')\n" +
+    "    expect(body['size']).toBe('1536x864')\n" +
+    '  })\n' +
+    '\n' +
+    "  it('preset 关掉 aspect_ratio 就不下发', () => {\n" +
+    "    const r = parseHeadlessParams({ prompt: 'x', aspect: '9:16' })\n" +
+    '    expect(r.ok).toBe(true)\n' +
+    '    if (!r.ok) return\n' +
+    "    const body = buildImageBody(r.params, { ...legacyPreset, sendAspectRatio: false }, 'x')\n" +
+    "    expect('aspect_ratio' in body).toBe(false)\n" +
+    '  })\n' +
+    '\n' +
+    "  it('单图传字符串，多图传数组，字段名跟随 preset', () => {\n" +
+    "    const one = parseHeadlessParams({ prompt: 'x', images: ['AAAA'] })\n" +
+    "    const two = parseHeadlessParams({ prompt: 'x', images: ['AAAA', 'BBBB'] })\n" +
+    '    expect(one.ok && two.ok).toBe(true)\n' +
+    '    if (!one.ok || !two.ok) return\n' +
+    "    expect(buildImageBody(one.params, legacyPreset, 'x')['image']).toBe('AAAA')\n" +
+    "    expect(buildImageBody(two.params, { ...legacyPreset, imageFieldName: 'images' }, 'x')['images']).toEqual([\n" +
+    "      'AAAA',\n" +
+    "      'BBBB',\n" +
+    '    ])\n' +
+    '  })\n' +
+    '\n' +
+    "  it('2.6 六档 quality 直通到 body', () => {\n" +
+    "    const r = parseHeadlessParams({ prompt: 'x', quality: 'max', count: 2 }, 'gpt-image-2.6-flare')\n" +
+    '    expect(r.ok).toBe(true)\n' +
+    '    if (!r.ok) return\n' +
+    "    const body = buildImageBody(r.params, flarePreset, 'x')\n" +
+    "    expect(body['quality']).toBe('max')\n" +
+    "    expect(body['n']).toBe(2)\n" +
+    "    expect(body['model']).toBe('gpt-image-2.6-flare')\n" +
+    '  })\n' +
+    '\n' +
+    "  it('payload 体积按 0.75 估算', () => {\n" +
+    '    expect(estimatePayloadBytes([])).toBe(0)\n' +
+    "    expect(estimatePayloadBytes(['A'.repeat(4000)])).toBe(3000)\n" +
+    '  })\n' +
+    '})\n' +
+    '\n' +
+    "describe('cost — 成本预估', () => {\n" +
+    "  it('总价 = 单价 x 张数', () => {\n" +
+    '    expect(estimateCost(3, 0.5)).toBe(1.5)\n' +
+    '    expect(estimateCost(0, 9)).toBe(0)\n' +
+    '  })\n' +
+    '\n' +
+    "  it('非法数字一律归零，不抛错', () => {\n" +
+    '    expect(estimateCost(Number.NaN, 1)).toBe(0)\n' +
+    '    expect(estimateCost(1, Number.NaN)).toBe(0)\n' +
+    '  })\n' +
+    '\n' +
+    "  it('展示文案带张数', () => {\n" +
+    "    expect(formatCNY(1.5)).toBe('¥1.50')\n" +
+    "    expect(costPreview(2, 0.25)).toBe('¥0.50（2 张 x ¥0.25/张）')\n" +
+    '  })\n' +
+    '})\n' +
+    '\n' +
+    "describe('FifoQueue — 共用串行队列', () => {\n" +
+    "  it('严格按入队顺序串行执行', async () => {\n" +
+    '    const q = new FifoQueue()\n' +
+    '    const order: number[] = []\n' +
+    '    const first = q.enqueue(async () => {\n' +
+    '      order.push(1)\n' +
+    '      await new Promise((resolve) => setTimeout(resolve, 20))\n' +
+    '      order.push(2)\n' +
+    '    })\n' +
+    '    const second = q.enqueue(async () => {\n' +
+    '      order.pu'
+}{
+  file: 'main/history.test.ts',
+  len: 2997,
+  snippet: "import { beforeEach, describe, expect, it, vi } from 'vitest';\n" +
+    "import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';\n" +
+    "import { tmpdir } from 'node:os';\n" +
+    "import { join } from 'node:path';\n" +
+    '\n' +
+    'const mocks = vi.hoisted(() => ({\n' +
+    "  userData: '',\n" +
+    '}));\n' +
+    '\n' +
+    "vi.mock('electron', () => ({\n" +
+    '  app: {\n' +
+    '    getPath: (_name: string) => mocks.userData,\n' +
+    '  },\n' +
+    '  dialog: {},\n' +
+    '  BrowserWindow: {\n' +
+    '    getFocusedWindow: () => null,\n' +
+    '    getAllWindows: () => [],\n' +
+    '  },\n' +
+    '}));\n' +
+    '\n' +
+    "import { deleteHistory, listHistory } from './history';\n" +
+    "import type { HistoryEntry } from '../shared/types';\n" +
+    '\n' +
+    'function makeEntry(id: string, files: string[]): HistoryEntry {\n' +
+    '  return {\n' +
+    '    id,\n' +
+    '    createdAt: Date.now(),\n' +
+    "    presetName: 'test-preset',\n" +
+    "    model: 'gpt-image-2',\n" +
+    "    promptRaw: 'p',\n" +
+    "    promptResolved: 'p',\n" +
+    "    params: { aspect: '1:1', resolution: '1K', quality: 'medium', count: 1 },\n" +
+    "    size: '1024x1024',\n" +
+    '    refImageFiles: [],\n' +
+    '    images: files.map((file) => ({ file, url: `img://${file}` })),\n' +
+    '  };\n' +
+    '}\n' +
+    '\n' +
+    "describe('deleteHistory orphan GC', () => {\n" +
+    '  beforeEach(() => {\n' +
+    "    mocks.userData = mkdtempSync(join(tmpdir(), 'vitest-history-'));\n" +
+    "    mkdirSync(join(mocks.userData, 'images'), { recursive: true });\n" +
+    '  });\n' +
+    '\n' +
+    '  function seed(entries: HistoryEntry[], filesOnDisk: string[]) {\n' +
+    "    writeFileSync(join(mocks.userData, 'history.json'), JSON.stringify(entries, null, 2), 'utf-8');\n" +
+    '    for (const f of filesOnDisk) {\n' +
+    "      writeFileSync(join(mocks.userData, 'images', f), 'x', 'utf-8');\n" +
+    '    }\n' +
+    '  }\n' +
+    '\n' +
+    "  it('deletes orphan file, keeps referenced file', () => {\n" +
+    "    const e1 = makeEntry('e1', ['keep.png', 'shared.png']);\n" +
+    "    const e2 = makeEntry('e2', ['shared.png', 'gone.png']);\n" +
+    "    seed([e1, e2], ['keep.png', 'shared.png', 'gone.png']);\n" +
+    '\n' +
+    "    const rest = deleteHistory('e2');\n" +
+    "    expect(rest.map((e) => e.id)).toEqual(['e1']);\n" +
+    '\n' +
+    "    // target-exclusive file is GC'd\n" +
+    "    expect(existsSync(join(mocks.userData, 'images', 'gone.png'))).toBe(false);\n" +
+    '    // still-referenced files survive\n' +
+    "    expect(existsSync(join(mocks.userData, 'images', 'shared.png'))).toBe(true);\n" +
+    "    expect(existsSync(join(mocks.userData, 'images', 'keep.png'))).toBe(true);\n" +
+    '    // index no longer contains e2\n' +
+    "    const raw = JSON.parse(readFileSync(join(mocks.userData, 'history.json'), 'utf-8'));\n" +
+    "    expect(raw.map((e: HistoryEntry) => e.id)).toEqual(['e1']);\n" +
+    '  });\n' +
+    '\n' +
+    "  it('shared file survives when still used by remaining entry', () => {\n" +
+    "    const e1 = makeEntry('e1', ['shared.png']);\n" +
+    "    const e2 = makeEntry('e2', ['shared.png']);\n" +
+    "    seed([e1, e2], ['shared.png']);\n" +
+    '\n' +
+    "    deleteHistory('e2');\n" +
+    "    expect(existsSync(join(mocks.userData, 'images', 'shared.png'))).toBe(true);\n" +
+    "    expect(listHistory().map((e) => e.id)).toEqual(['e1']);\n" +
+    '  });\n' +
+    '\n' +
+    "  it('deleting missing id leaves files alone', () => {\n" +
+    "    const e1 = makeEntry('e1', ['keep.png']);\n" +
+    "    seed([e1], ['keep.png']);\n" +
+    "    deleteHistory('nope');\n" +
+    "    expect(existsSync(join(mocks.userData, 'images', 'keep.png'))).toBe(true);\n" +
+    '    expect(listHistory()).toHaveLength(1);\n' +
+    '  });\n' +
+    '});\n'
+}{
+  file: 'main/history.ts',
+  len: 10219,
+  snippet: "import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, renameSync } from 'node:fs'\n" +
+    "import { join, basename, extname, resolve, sep } from 'node:path'\n" +
+    "import { app, dialog, BrowserWindow } from 'electron'\n" +
+    "import type { CacheStats, HistoryEntry } from '../shared/types'\n" +
+    '\n' +
+    'function userDataDir(): string {\n' +
+    "  return app.getPath('userData')\n" +
+    '}\n' +
+    '\n' +
+    'function indexPath(): string {\n' +
+    "  return join(userDataDir(), 'history.json')\n" +
+    '}\n' +
+    '\n' +
+    'function imagesDir(): string {\n' +
+    "  const d = join(app.getPath('userData'), 'images')\n" +
+    '  if (!existsSync(d)) mkdirSync(d, { recursive: true })\n' +
+    '  return d\n' +
+    '}\n' +
+    '\n' +
+    '// 下载类 IPC 只接受「images/ 目录下的单个 png 文件名」，不接受任何路径。\n' +
+    '// 白名单 ^[A-Za-z0-9_.-]+\\.png$ 直接挡掉 ../、绝对路径、分隔符和空字节；\n' +
+    '// 再加长度上限，避免超长文件名拖垮文件系统 / 对话框。\n' +
+    'const SAFE_IMAGE_FILENAME = /^[A-Za-z0-9_.-]+\\.png$/\n' +
+    'const SAFE_IMAGE_FILENAME_MAX = 200\n' +
+    '\n' +
+    'export function isSafeImageFilename(name: unknown): name is string {\n' +
+    '  return (\n' +
+    "    typeof name === 'string' &&\n" +
+    '    name.length > 0 &&\n' +
+    '    name.length <= SAFE_IMAGE_FILENAME_MAX &&\n' +
+    '    SAFE_IMAGE_FILENAME.test(name) &&\n' +
+    "    !name.includes('..')\n" +
+    '  )\n' +
+    '}\n' +
+    '\n' +
+    '// 把通过白名单的文件名解析成 images/ 下的绝对路径，并再做一次 startsWith 兜底，\n' +
+    '// 确保最终读写的路径一定落在 imagesDir 内（防 join 之后的路径逃逸）。\n' +
+    'function safeImagePath(name: string): string | null {\n' +
+    '  if (!isSafeImageFilename(name)) return null\n' +
+    '  const dir = imagesDir()\n' +
+    '  const abs = resolve(join(dir, name))\n' +
+    '  if (abs !== join(dir, name) || !abs.startsWith(resolve(dir) + sep)) return null\n' +
+    '  return abs\n' +
+    '}\n' +
+    '\n' +
+    'function readIndex(): HistoryEntry[] {\n' +
+    '  const p = indexPath()\n' +
+    '  if (!existsSync(p)) return []\n' +
+    '  try {\n' +
+    "    const raw = readFileSync(p, 'utf-8')\n" +
+    '    const arr = JSON.parse(raw) as HistoryEntry[]\n' +
+    '    if (!Array.isArray(arr)) return []\n' +
+    '    return arr\n' +
+    '  } catch {\n' +
+    '    // history.json 损坏时：把坏文件改名为 history.corrupt-<时间戳>.json 留证，\n' +
+    '    // 返回空列表让应用照常启动。只备份、不删除——用户数据一条都不丢，\n' +
+    '    // 修好 JSON 后改回文件名即可恢复。\n' +
+    '    try {\n' +
+    "      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)\n" +
+    '      renameSync(p, join(userDataDir(), `history.corrupt-${stamp}.json`))\n' +
+    '    } catch { /* 备份失败也无妨，下次启动再试 */ }\n' +
+    '    return []\n' +
+    '  }\n' +
+    '}\n' +
+    '\n' +
+    'function writeIndex(arr: HistoryEntry[]): void {\n' +
+    '  const dir = userDataDir()\n' +
+    '  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })\n' +
+    '  // 原子写：先写 tmp 再 rename，避免进程崩溃时 history.json 写一半变坏。\n' +
+    '  // tmp 与目标同目录，保证 rename 是同文件系统原子操作。\n' +
+    '  const p = indexPath()\n' +
+    '  const tmp = `${p}.tmp`\n' +
+    "  writeFileSync(tmp, JSON.stringify(arr, null, 2), 'utf-8')\n" +
+    '  renameSync(tmp, p)\n' +
+    '}\n' +
+    '\n' +
+    'export function listHistory(): HistoryEntry[] {\n' +
+    '  return readIndex().sort((a, b) => b.createdAt - a.createdAt)\n' +
+    '}\n' +
+    '\n' +
+    'export function appendHistory(entry: HistoryEntry): HistoryEntry[] {\n' +
+    '  const arr = readIndex()\n' +
+    '  arr.push(entry)\n' +
+    '  writeIndex(arr)\n' +
+    '  return listHistory()\n' +
+    '}\n' +
+    '\n' +
+    'export function deleteHistory(id: string): HistoryEntry[] {\n' +
+    '  const arr = readIndex()\n' +
+    '  const target = arr.find((e) => e.id === id)\n' +
+    '  const rest = arr.filter((e) => e.id !== id)\n' +
+    '  writeIndex(rest)\n' +
+    '  // 单条删除同时回收它独占的生成图文件：先收集剩余条目仍在引用的文件名，\n' +
+    '  // 只删除不再被任何条目引用的文件，避免误删多条历史共享同名 plate 的极端情况。\n' +
+    '  try {\n' +
+    '    const stillUsed = new Set<string>()\n' +
+    '    for (const e of rest) {\n' +
+    '      for (const img of e.images ?? []) {\n' +
+    '        if (img?.file) stillUsed.add(img.file)\n' +
+    '      }\n' +
+    '    }\n' +
+    '    const dir = imagesDir()\n' +
+    '    for (const img of target?.images ?? []) {\n' +
+    '      const f = img?.file\n' +
+    '      if (!f || stillUsed.has(f)) continue\n' +
+    "      if (f.includes('..') || f.includes('/') || f.includes('\\\\')) continue\n" +
+    '      const abs = join(dir, f)\n' +
+    '      if (existsSync(abs)) {\n' +
+    '        try { unlinkSync(abs) } catch { /* ignore */ }\n' +
+    '      }\n' +
+    '    }\n' +
+    '  } catch { /* GC 失败不影响删除本身 */ }\n' +
+    '  return listHistory()\n' +
+    '}\n' +
+    '\n' +
+    'export function clearHistory(): HistoryEntry[] {\n' +
+    '  const dir = imagesDir()\n' +
+    '  try {\n' +
+    '    for (const f of readdirSync(dir)) {\n' +
+    '      try { unlinkSync(join(dir, f)) } catch { /* ignore */ }\n' +
+    '    }\n' +
+    '  } catch { /* dir 可能不存在，没问题 */ }\n' +
+    '  writeIndex([])\n' +
+    '  return []\n' +
+    '}\n' +
+    '\n' +
+    '// ---------------- 缓存统计 + 按项清理 ----------------\n' +
+    '// 体积口径：\n' +
+    '//   - imageBytes：images/ 目录下全部生成图文件的实际字节\n' +
+    '//   - historyBytes：history.json 文件体积（含内嵌的参考图快照）\n' +
+    '//   - refBytes：历史条目里 refImages[].dataUrl 的 base64 估算字节（history.json 的子集，\n' +
+    '//     单独列出来是为了让用户看清“参考图快照占了多少”，清理时可单独剥离）\n' +
+    '//   - totalBytes = imageBytes + historyBytes（用户磁盘上真实占用的合计数）\n' +
+    '\n' +
+    'function approxDataUrlBytes(dataUrl: string): number {\n' +
+    "  const i = dataUrl.indexOf(',')\n" +
+    '  const b64 = i >= 0 ? dataUrl.slice(i + 1) : dataUrl\n' +
+    '  return Math.floor(b64.length * 0.75)\n' +
+    '}\n' +
+    '\n' +
+    'export function getCacheStats(): CacheStats {\n' +
+    '  const dir = imagesDir()\n' +
+    '  let imageCount = 0\n' +
+    '  let imageBytes = 0\n' +
+    '  try {\n' +
+    '    for (const f of readdirSync(dir)) {\n' +
+    '      try {\n' +
+    '        const st = statSync(join(dir, f))\n' +
+    '        if (st.isFile()) {\n' +
+    '          imageCount += 1\n' +
+    '          imageBytes += st.size\n' +
+    '        }\n' +
+    '      } catch { /* ignore */ }\n' +
+    '    }\n' +
+    '  } catch { /* dir 可能不存在 */ }\n' +
+    '\n' +
+    '  let historyBytes = 0\n' +
+    '  try {\n' +
+    '    const st = statSync(indexPath())\n' +
+    '    if (st.isFile()) historyBytes = st.size\n' +
+    '  } catch { /* ignore */ }\n' +
+    '\n' +
+    '  const entries = readIndex()\n' +
+    '  let refCount = 0\n' +
+    '  let refBytes = 0\n' +
+    '  for (const e of entries) {\n' +
+    '    const refs = Array.isArray(e.refImages) ? e.refImages : []\n' +
+    '    for (const r of refs) {\n' +
+    '      refCount += 1\n' +
+    "      if (typeof r?.dataUrl === 'string') refBytes += approxDataUrlBytes(r.dataUrl)\n" +
+    '    }\n' +
+    '  }\n' +
+    '\n' +
+    '  return {\n' +
+    '    imageCount,\n' +
+    '    imageBytes,\n' +
+    '    historyCount: entries.length,\n' +
+    '    historyBytes,\n' +
+    '    refCount,\n' +
+    '    refBytes,\n' +
+    '    totalBytes: imageBytes + historyBytes,\n' +
+    '    userDataDir: userDataDir(),\n' +
+    '    imagesDir: dir,\n' +
+    '  }\n' +
+    '}\n' +
+    '\n' +
+    '// 只清生成图文件（images/*.png），历史条目保留（条目里的图会显示为缺失，由 UI 兜底）。\n' +
+    'export function clearGeneratedImages(): CacheStats {\n' +
+    '  const dir = imagesDir()\n' +
+    '  try {\n' +
+    '    for (const f of readdirSync(dir)) {\n' +
+    '      try { unlinkSync(join(dir, f)) } catch { /* ignore */ }\n' +
+    '    }\n' +
+    '  } catch { /* dir 可能不存在，没问题 */ }\n' +
+    '  return getCacheStats()\n' +
+    '}\n' +
+    '\n' +
+    '// 只剥离历史条目里的参考图快照（refImages 置空），生成图 + 历史索引都保留。\n' +
+    '// 这是 history.json 膨胀的主因：每张参考图快照约几百 KB ~ 数 MB。\n' +
+    'export function clearRefCache(): CacheStats {\n' +
+    '  const arr = readIndex()\n' +
+    '  let changed = false\n' +
+    '  for (const e of arr) {\n' +
+    '    if (Array.isArray(e.refImages) && e.refImages.length > 0) {\n' +
+    '      e.refImages = []\n' +
+    '      changed ='
+}{
+  file: 'main/index.ts',
+  len: 6901,
+  snippet: "import { app, BrowserWindow, ipcMain, protocol } from 'electron'\n" +
+    "import { join } from 'node:path'\n" +
+    "import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'\n" +
+    "import { CH } from '../shared/ipc'\n" +
+    'import {\n' +
+    '  loadSettings, saveSettings, addModel, deleteModel,\n' +
+    '  addPreset, updatePreset, deletePreset, setActivePreset,\n' +
+    '  addSkill, deleteSkill,\n' +
+    "} from './settings'\n" +
+    "import { generate, cancel } from './api'\n" +
+    'import {\n' +
+    '  appendHistory, deleteHistory, listHistory, clearHistory, downloadHistoryFile, downloadHistoryFiles,\n' +
+    '  getCacheStats, clearGeneratedImages, clearRefCache, clearAllCache,\n' +
+    '  isSafeImageFilename,\n' +
+    "} from './history'\n" +
+    "import { registerImageProtocol } from './protocol'\n" +
+    '\n' +
+    '// img:// scheme registration MUST run before app.whenReady().\n' +
+    'protocol.registerSchemesAsPrivileged([\n' +
+    "  { scheme: 'img', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },\n" +
+    '])\n' +
+    '\n' +
+    '// 改名迁移：appId 从 com.pony.gptimage2 → com.pony.gptimagestudio，\n' +
+    '// productName 从 "GPT Image 2" → "GPT Image" 后，userData 目录会变化，\n' +
+    '// 旧的历史/设置/图片全在老目录里。首次启动时把老目录内容拷贝过来\n' +
+    '// （只拷贝、不删除老目录、不覆盖新目录已有文件），老用户升级不断档。\n' +
+    '//\n' +
+    '// 老目录有两种可能（都要兼容）：\n' +
+    '//   1. 打包版旧应用：`…/Application Support/GPT Image 2`（按旧 productName 推导）\n' +
+    '//   2. 开发版跑出来的：`…/Application Support/gpt-image-2`（按旧 package.json name 推导）\n' +
+    '// 候选按优先级排序，命中第一个含数据的即用，不逐个合并（防两个老目录各一份导致混拷）。\n' +
+    'function migrateLegacyUserData(): void {\n' +
+    '  try {\n' +
+    "    const next = app.getPath('userData')\n" +
+    "    const appData = app.getPath('appData')\n" +
+    '    const candidates = [\n' +
+    "      join(appData, 'GPT Image 2'),\n" +
+    "      join(appData, 'gpt-image-2'),\n" +
+    '    ].filter((p) => p !== next)\n' +
+    '    const legacy = candidates.find((p) => {\n' +
+    '      try {\n' +
+    '        if (!existsSync(p) || !statSync(p).isDirectory()) return false\n' +
+    '        // 含任一有效数据才算命中：空的 Electron 残留目录不算\n' +
+    "        if (existsSync(join(p, 'settings.json'))) return true\n" +
+    "        if (existsSync(join(p, 'history.json'))) return true\n" +
+    "        try { return readdirSync(join(p, 'images')).length > 0 } catch { return false }\n" +
+    '      } catch { return false }\n' +
+    '    })\n' +
+    '    if (!legacy) return\n' +
+    '    if (!existsSync(next)) mkdirSync(next, { recursive: true })\n' +
+    '    // 只有新目录完全没数据时才迁：避免把旧快照覆盖掉新用户已用的配置。\n' +
+    '    // 新目录已有 settings.json/history.json/images 任一 → 视为已迁移或新用户，跳过。\n' +
+    '    const hasData =\n' +
+    "      existsSync(join(next, 'settings.json')) ||\n" +
+    "      existsSync(join(next, 'history.json')) ||\n" +
+    '      (() => {\n' +
+    "        try { return readdirSync(join(next, 'images')).length > 0 } catch { return false }\n" +
+    '      })()\n' +
+    '    if (hasData) return\n' +
+    '    let copied = 0\n' +
+    '    let skipped = 0\n' +
+    "    for (const name of ['settings.json', 'history.json']) {\n" +
+    '      const src = join(legacy, name)\n' +
+    '      const dest = join(next, name)\n' +
+    '      try {\n' +
+    '        if (!existsSync(src) || !statSync(src).isFile() || existsSync(dest)) { skipped += 1; continue }\n' +
+    '        copyFileSync(src, dest)\n' +
+    '        copied += 1\n' +
+    '      } catch (e) {\n' +
+    '        console.error(`[migrate] copy failed: ${name}`, e)\n' +
+    '      }\n' +
+    '    }\n' +
+    '    // images 目录逐文件拷贝（只拷缺失、不覆盖）：cpSync 整目录在 dest 已存在时\n' +
+    '    // 行为不一致，逐文件最稳，也能逐个统计。\n' +
+    '    try {\n' +
+    "      const srcDir = join(legacy, 'images')\n" +
+    '      if (existsSync(srcDir) && statSync(srcDir).isDirectory()) {\n' +
+    "        const destDir = join(next, 'images')\n" +
+    '        if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })\n' +
+    '        for (const f of readdirSync(srcDir)) {\n' +
+    '          try {\n' +
+    '            const src = join(srcDir, f)\n' +
+    '            const dest = join(destDir, f)\n' +
+    '            if (!statSync(src).isFile() || existsSync(dest)) { skipped += 1; continue }\n' +
+    '            copyFileSync(src, dest)\n' +
+    '            copied += 1\n' +
+    '          } catch { skipped += 1 }\n' +
+    '        }\n' +
+    '      }\n' +
+    '    } catch (e) {\n' +
+    "      console.error('[migrate] copy failed: images', e)\n" +
+    '    }\n' +
+    '    console.log(`[migrate] legacy userData copied: ${legacy} -> ${next} (copied=${copied} skipped=${skipped}, legacy kept)`)\n' +
+    '  } catch (e) {\n' +
+    '    // 迁移失败不阻塞启动：用户最多是旧历史没带过来，老目录原样保留可手动拷。\n' +
+    "    console.error('[migrate] legacy userData migration failed', e)\n" +
+    '  }\n' +
+    '}\n' +
+    '\n' +
+    'function createWindow() {\n' +
+    '  const win = new BrowserWindow({\n' +
+    '    width: 1180,\n' +
+    '    height: 820,\n' +
+    '    minWidth: 980,\n' +
+    '    minHeight: 660,\n' +
+    '    show: false,\n' +
+    "    titleBarStyle: 'hiddenInset',\n" +
+    '    trafficLightPosition: { x: 16, y: 18 },\n' +
+    "    vibrancy: 'sidebar',\n" +
+    "    visualEffectState: 'active',\n" +
+    "    backgroundColor: '#00000000',\n" +
+    '    transparent: false,\n' +
+    '    webPreferences: {\n' +
+    "      preload: join(__dirname, '../preload/index.js'),\n" +
+    '      contextIsolation: true,\n' +
+    '      nodeIntegration: false,\n' +
+    '      sandbox: true,\n' +
+    '    },\n' +
+    '  })\n' +
+    "  win.once('ready-to-show', () => win.show())\n" +
+    '  if (process.env.ELECTRON_RENDERER_URL) {\n' +
+    '    win.loadURL(process.env.ELECTRON_RENDERER_URL)\n' +
+    '  } else {\n' +
+    "    win.loadFile(join(__dirname, '../renderer/index.html'))\n" +
+    '  }\n' +
+    '}\n' +
+    '\n' +
+    'ipcMain.handle(CH.settingsGet, async () => loadSettings())\n' +
+    'ipcMain.handle(CH.settingsSet, async (_e, patch) => saveSettings(patch))\n' +
+    'ipcMain.handle(CH.modelsAdd, async (_e, name) => addModel(name))\n' +
+    'ipcMain.handle(CH.modelsDelete, async (_e, name) => deleteModel(name))\n' +
+    'ipcMain.handle(CH.presetsAdd, async (_e, p) => addPreset(p))\n' +
+    'ipcMain.handle(CH.presetsUpdate, async (_e, p) => updatePreset(p))\n' +
+    'ipcMain.handle(CH.presetsDelete, async (_e, id) => deletePreset(id))\n' +
+    'ipcMain.handle(CH.presetsSetActive, async (_e, id) => setActivePreset(id))\n' +
+    'ipcMain.handle(CH.skillsAdd, async (_e, input) => addSkill(input))\n' +
+    'ipcMain.handle(CH.skillsDelete, async (_e, id) => deleteSkill(id))\n' +
+    'ipcMain.handle(CH.generateRun, async (_e, req) => {\n' +
+    '  const r = await generate(req)\n' +
+    '  if (r.ok) appendHistory(r.entry)\n' +
+    '  return r\n' +
+    '})\n' +
+    'ipcMain.handle(CH.generateCancel, async (_e, { requestId }) => { cancel(requestId) })\n' +
+    'ipcMain.handle(CH.historyList, async () => listHistory())\n' +
+    'ipcMain.handle(CH.historyDelete, async (_e, { id }) => deleteHistory(id))\n' +
+    'ipcMain.handle(CH.historyClear, async () => clearHistory())\n' +
+    'ipcMain.handle(CH.cacheStats, async () => getCacheStats())\n' +
+    'ipcMain.handle(CH.cacheClearImages, async () => clearGeneratedImages())\n' +
+    'ipcMain.handle(CH.cacheClearRefs, async () => clearRefCache())\n' +
+    'ipcMain.handle(CH.cacheClearAll, async () => {\n' +
+    '  const stats = clearAllCache()\n' +
+    '  return { entries: '
+}{
+  file: 'main/normalize.test.ts',
+  len: 3946,
+  snippet: "import { beforeEach, describe, expect, it, vi } from 'vitest';\n" +
+    "import { mkdtempSync, mkdirSync, existsSync, readdirSync } from 'node:fs';\n" +
+    "import { tmpdir } from 'node:os';\n" +
+    "import { join } from 'node:path';\n" +
+    '\n' +
+    'const mocks = vi.hoisted(() => ({\n' +
+    "  userData: '',\n" +
+    '}));\n' +
+    '\n' +
+    "vi.mock('electron', () => ({\n" +
+    '  app: {\n' +
+    '    getPath: (_name: string) => mocks.userData,\n' +
+    '  },\n' +
+    '  net: {\n' +
+    '    request: () => {\n' +
+    '      const reqHandlers = new Map<string, Function[]>();\n' +
+    '      const on = (ev: string, cb: Function) => {\n' +
+    '        const arr = reqHandlers.get(ev) ?? [];\n' +
+    '        arr.push(cb);\n' +
+    '        reqHandlers.set(ev, arr);\n' +
+    '        return undefined as never;\n' +
+    '      };\n' +
+    '      return {\n' +
+    '        on,\n' +
+    '        abort: () => {},\n' +
+    '        end: () => {\n' +
+    '          const respHandlers = new Map<string, Function[]>();\n' +
+    '          const resp = {\n' +
+    "            headers: { 'content-length': '4', 'content-type': 'image/png' },\n" +
+    '            on: (ev: string, cb: Function) => {\n' +
+    '              const arr = respHandlers.get(ev) ?? [];\n' +
+    '              arr.push(cb);\n' +
+    '              respHandlers.set(ev, arr);\n' +
+    '            },\n' +
+    '          };\n' +
+    "          for (const fn of reqHandlers.get('response') ?? []) fn(resp);\n" +
+    '          setTimeout(() => {\n' +
+    "            for (const fn of respHandlers.get('data') ?? []) fn(Buffer.from('fake'));\n" +
+    "            for (const fn of respHandlers.get('end') ?? []) fn();\n" +
+    '          }, 0);\n' +
+    '        },\n' +
+    '      };\n' +
+    '    },\n' +
+    '  },\n' +
+    '}));\n' +
+    '\n' +
+    "vi.mock('./settings', () => ({\n" +
+    '  loadSettings: () => ({}),\n' +
+    '}));\n' +
+    '\n' +
+    "vi.mock('./presets', () => ({\n" +
+    "  activePreset: () => ({ name: 'test-preset', model: 'gpt-image-2' }),\n" +
+    '}));\n' +
+    '\n' +
+    "import { normalizeResponse } from './normalize';\n" +
+    "import type { GenerateRequest } from '../shared/types';\n" +
+    '\n' +
+    'function makeReq(count: number): GenerateRequest {\n' +
+    '  return {\n' +
+    "    requestId: 'req-test-1',\n" +
+    "    promptRaw: 'a cat',\n" +
+    "    promptResolved: 'a cat',\n" +
+    "    params: { aspect: '1:1', resolution: '1K', quality: 'medium', count: count as 1 | 2 | 3 | 4 },\n" +
+    '    images: [],\n' +
+    '  };\n' +
+    '}\n' +
+    '\n' +
+    "const B64 = Buffer.from('hello-world').toString('base64');\n" +
+    '\n' +
+    "describe('normalizeResponse', () => {\n" +
+    '  beforeEach(() => {\n' +
+    "    mocks.userData = mkdtempSync(join(tmpdir(), 'vitest-normalize-'));\n" +
+    "    mkdirSync(join(mocks.userData, 'images'), { recursive: true });\n" +
+    '  });\n' +
+    '\n' +
+    "  it('b64 via data array writes file and returns ok', async () => {\n" +
+    '    const res = await normalizeResponse(makeReq(1), { data: [{ b64_json: B64 }] });\n' +
+    '    expect(res.ok).toBe(true);\n' +
+    '    if (!res.ok) return;\n' +
+    '    expect(res.entry.images).toHaveLength(1);\n' +
+    "    expect(existsSync(join(mocks.userData, 'images', res.entry.images[0]!.file))).toBe(true);\n" +
+    '  });\n' +
+    '\n' +
+    "  it('b64 via top-level b64_json string', async () => {\n" +
+    '    const res = await normalizeResponse(makeReq(1), { b64_json: B64 });\n' +
+    '    expect(res.ok).toBe(true);\n' +
+    '  });\n' +
+    '\n' +
+    "  it('b64 via top-level b64_json array', async () => {\n" +
+    '    const res = await normalizeResponse(makeReq(2), { b64_json: [B64, B64] });\n' +
+    '    // dedup: same content twice collapses to 1 (documented behavior)\n' +
+    '    expect(res.ok).toBe(true);\n' +
+    '    if (!res.ok) return;\n' +
+    '    expect(res.entry.images.length).toBeGreaterThanOrEqual(1);\n' +
+    '  });\n' +
+    '\n' +
+    "  it('url via data array downloads (mocked net) and writes file', async () => {\n" +
+    "    const res = await normalizeResponse(makeReq(1), { data: [{ url: 'https://example.com/a.png' }] });\n" +
+    '    expect(res.ok).toBe(true);\n' +
+    '    if (!res.ok) return;\n' +
+    '    expect(res.entry.images).toHaveLength(1);\n' +
+    '  });\n' +
+    '\n' +
+    "  it('url via top-level url', async () => {\n" +
+    "    const res = await normalizeResponse(makeReq(1), { url: 'https://example.com/b.png' });\n" +
+    '    expect(res.ok).toBe(true);\n' +
+    '  });\n' +
+    '\n' +
+    "  it('empty packet returns parse error', async () => {\n" +
+    '    const res = await normalizeResponse(makeReq(1), {});\n' +
+    '    expect(res.ok).toBe(false);\n' +
+    '    if (res.ok) return;\n' +
+    "    expect(res.code).toBe('parse');\n" +
+    '  });\n' +
+    '\n' +
+    "  it('lists images dir growth as sanity', async () => {\n" +
+    '    await normalizeResponse(makeReq(1), { data: [{ b64_json: B64 }] });\n' +
+    "    expect(readdirSync(join(mocks.userData, 'images')).length).toBeGreaterThanOrEqual(1);\n" +
+    '  });\n' +
+    '});\n'
+}{
+  file: 'main/normalize.ts',
+  len: 9073,
+  snippet: "import { writeFileSync, mkdirSync } from 'node:fs'\n" +
+    "import { join } from 'node:path'\n" +
+    "import { app } from 'electron'\n" +
+    "import type { GenerateRequest, GenerateResult, HistoryEntry } from '../shared/types'\n" +
+    "import { sizeString } from '../shared/size'\n" +
+    "import { loadSettings } from './settings'\n" +
+    "import { activePreset } from './presets'\n" +
+    '\n' +
+    'interface RawImage {\n' +
+    '  file: string\n' +
+    '  url: string\n' +
+    '  width?: number\n' +
+    '  height?: number\n' +
+    "  mime: 'image/png'\n" +
+    '  bytes: number\n' +
+    '}\n' +
+    '\n' +
+    'function id(): string {\n' +
+    '  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)\n' +
+    '}\n' +
+    '\n' +
+    'function safeId(s: string): string {\n' +
+    "  return s.replace(/[^a-zA-Z0-9_-]/g, '_')\n" +
+    '}\n' +
+    '\n' +
+    'function imagesDir(): string {\n' +
+    "  const d = join(app.getPath('userData'), 'images')\n" +
+    '  mkdirSync(d, { recursive: true })\n' +
+    '  return d\n' +
+    '}\n' +
+    '\n' +
+    '// URL 回包下载：60s 超时 + 50MB 体积上限。\n' +
+    '// 之前是裸 net.request：中转站返回超大/假死 URL 会一直挂着不回来，\n' +
+    '// 内存里攒 Buffer 也可能把主进程撑爆。超限直接报 io 错，不写盘、不进历史。\n' +
+    'const URL_DOWNLOAD_TIMEOUT_MS = 60_000\n' +
+    'const URL_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024\n' +
+    '\n' +
+    'async function downloadIfUrl(url: string): Promise<{ data: Buffer; mime: string } | { ok: false }> {\n' +
+    '  try {\n' +
+    "    const { net } = await import('electron')\n" +
+    '    return await new Promise((resolve) => {\n' +
+    '      let settled = false\n' +
+    '      const done = (v: { data: Buffer; mime: string } | { ok: false }) => {\n' +
+    '        if (settled) return\n' +
+    '        settled = true\n' +
+    '        clearTimeout(timer)\n' +
+    '        resolve(v)\n' +
+    '      }\n' +
+    '      const timer = setTimeout(() => {\n' +
+    '        try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }\n' +
+    '        done({ ok: false })\n' +
+    '      }, URL_DOWNLOAD_TIMEOUT_MS)\n' +
+    "      const req = net.request({ url, method: 'GET' })\n" +
+    '      const chunks: Buffer[] = []\n' +
+    '      let received = 0\n' +
+    "      let mime = 'image/png'\n" +
+    "      req.on('response', (resp) => {\n" +
+    '        // Content-Length 先验：超限直接掐掉，连 body 都不收\n' +
+    "        const cl = resp.headers['content-length']\n" +
+    '        const declared = Array.isArray(cl) ? cl[0] : cl\n' +
+    "        if (typeof declared === 'string' && /^\\d+$/.test(declared.trim())) {\n" +
+    '          if (Number(declared) > URL_DOWNLOAD_MAX_BYTES) {\n' +
+    '            try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }\n' +
+    '            done({ ok: false })\n' +
+    '            return\n' +
+    '          }\n' +
+    '        }\n' +
+    "        const ct = resp.headers['content-type']\n" +
+    "        if (typeof ct === 'string') mime = ct.split(';')[0] || mime\n" +
+    "        resp.on('data', (c) => {\n" +
+    '          received += (c as Buffer).length\n' +
+    '          if (received > URL_DOWNLOAD_MAX_BYTES) {\n' +
+    '            try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }\n' +
+    '            done({ ok: false })\n' +
+    '            return\n' +
+    '          }\n' +
+    '          chunks.push(c as Buffer)\n' +
+    '        })\n' +
+    "        resp.on('end', () => done({ data: Buffer.concat(chunks), mime }))\n" +
+    "        resp.on('error', () => done({ ok: false } as never))\n" +
+    '      })\n' +
+    "      req.on('error', () => done({ ok: false } as never))\n" +
+    '      req.end()\n' +
+    '    })\n' +
+    '  } catch {\n' +
+    '    return { ok: false } as never\n' +
+    '  }\n' +
+    '}\n' +
+    '\n' +
+    'export async function normalizeResponse(req: GenerateRequest, raw: unknown): Promise<GenerateResult> {\n' +
+    '  const images = extractImages(raw)\n' +
+    '  if (images.length === 0) {\n' +
+    "    const bodyStr = typeof raw === 'string' ? raw : (() => { try { return JSON.stringify(raw) } catch { return String(raw) } })()\n" +
+    "    return { ok: false, code: 'parse', message: '未识别的响应格式', body: bodyStr.slice(0, 2000) }\n" +
+    '  }\n' +
+    '\n' +
+    '  // If the proxy returned FEWER images than we asked for, the upstream model\n' +
+    '  // probably capped `n` silently (or the proxy dropped a plate while\n' +
+    '  // re-wrapping the response). Log it loudly so a developer running with\n' +
+    '  // DevTools open sees what really came back — and include it in the user-\n' +
+    "  // facing message so the discrepancy isn't hidden.\n" +
+    '  const requested = req.params.count\n' +
+    '  if (images.length < requested) {\n' +
+    '    console.warn(`[normalize] requested ${requested} image(s), proxy returned ${images.length}`)\n' +
+    '  }\n' +
+    '\n' +
+    '  const entry: HistoryEntry = {\n' +
+    '    id: id(),\n' +
+    '    createdAt: Date.now(),\n' +
+    '    presetName: activePreset(loadSettings()).name,\n' +
+    '    model: activePreset(loadSettings()).model,\n' +
+    '    promptRaw: req.promptRaw,\n' +
+    '    promptResolved: req.promptResolved,\n' +
+    '    params: req.params,\n' +
+    "    size: sizeString(req.params.aspect, req.params.resolution, 'computed'),\n" +
+    '    refImageFiles: [],\n' +
+    '    // 参考图快照随历史持久化，回填时可直接恢复（老条目没有则为空）。\n' +
+    '    // 注意体积：快照是 JPEG dataUrl，history.json 会随条目线性变大，\n' +
+    '    // 瘦身请用 Cache 弹窗的“参考图快照”清理（只剥快照、不动历史）。\n' +
+    '    refImages: Array.isArray(req.refImages) ? req.refImages : [],\n' +
+    '    images: [],\n' +
+    '  }\n' +
+    '\n' +
+    '  const dir = imagesDir()\n' +
+    '  const saved: RawImage[] = []\n' +
+    '  for (let i = 0; i < images.length; i++) {\n' +
+    '    const img = images[i]\n' +
+    '    if (!img) continue\n' +
+    '    const name = `${safeId(req.requestId)}-${i}.png`\n' +
+    '    try {\n' +
+    "      if (img.kind === 'b64') {\n" +
+    "        const bytes = Buffer.from(img.data, 'base64')\n" +
+    '        writeFileSync(join(dir, name), bytes)\n' +
+    "        saved.push({ file: name, url: `img://${name}`, mime: 'image/png', bytes: bytes.length })\n" +
+    "        console.log('[localFile] saved', name, bytes.length + 'B', `img://${name}`);\n" +
+    '      } else {\n' +
+    '        const got = await downloadIfUrl(img.url)\n' +
+    "        if ('ok' in got) {\n" +
+    "          return { ok: false, code: 'io', message: '下载生成图片失败（超时或文件过大，限 60s / 50MB）' }\n" +
+    '        }\n' +
+    '        writeFileSync(join(dir, name), got.data)\n' +
+    "        saved.push({ file: name, url: `img://${name}`, mime: 'image/png', bytes: got.data.length })\n" +
+    '      }\n' +
+    '    } catch (e) {\n' +
+    "      return { ok: false, code: 'io', message: `写入图片失败：${(e as Error).message}` }\n" +
+    '    }\n' +
+    '  }\n' +
+    '\n' +
+    '  entry.images = saved.map((s) => ({ file: s.file, url: s.url }))\n' +
+    "  console.log('[job] job_id=', req.requestId, 'saved', saved.length + '/' + images.length, 'size=', req.params.aspect, req.params.resolution);\n" +
+    "  console.log('[file] protocol img:// files=', saved.map((s) => s.file).slice(0, 4).join(','));\n" +
+    '  return { ok: true, entry }\n' +
+    '}\n' +
+    '\n' +
+    "type Extracted = { kind: 'b64'; data: string } | { kind: 'url'; url: string }\n" +
+    '\n' +
+    '// Pull every image we can find out of an arbitrary response object.\n' +
+    '//\n' +
+    '// Proxies in the wild wrap OpenAI-style responses in many shapes. We used\n' +
+    '// to only '
+}{
+  file: 'main/protocol.ts',
+  len: 1515,
+  snippet: "import { app, protocol } from 'electron'\n" +
+    "import { join } from 'node:path'\n" +
+    "import * as fs from 'node:fs/promises'\n" +
+    '\n' +
+    'export function registerImageProtocol(): void {\n' +
+    '  // Must be called after app.whenReady().\n' +
+    "  protocol.handle('img', async (req) => {\n" +
+    '    try {\n' +
+    '      // Note: WHATWG URL parses `img://filename.png` as authority=`filename.png`,\n' +
+    '      // pathname=`/` — `new URL(...).pathname` would drop the filename into the\n' +
+    '      // authority. Strip scheme manually and trim trailing slashes; the remainder\n' +
+    '      // is the safe filename. We do NOT support subdirectories.\n' +
+    "      const stripped = req.url.replace(/^img:\\/\\//, '').replace(/\\/+$/, '')\n" +
+    "      if (!stripped || stripped.includes('..') || stripped.includes('\\\\') || stripped.includes('/')) {\n" +
+    "        return new Response('bad path', { status: 400 })\n" +
+    '      }\n' +
+    '      const file = stripped\n' +
+    "      const abs = join(app.getPath('userData'), 'images', file)\n" +
+    '      const buf = await fs.readFile(abs)\n' +
+    "      const ext = file.split('.').pop()?.toLowerCase()\n" +
+    '      const mime =\n' +
+    "        ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' :\n" +
+    "        ext === 'webp' ? 'image/webp' :\n" +
+    "        'image/png'\n" +
+    '      return new Response(buf, {\n' +
+    '        status: 200,\n' +
+    '        headers: {\n' +
+    "          'Content-Type': mime,\n" +
+    "          'Content-Length': String(buf.length),\n" +
+    "          'Cache-Control': 'no-cache',\n" +
+    '        },\n' +
+    '      })\n' +
+    '    } catch (e) {\n' +
+    "      console.error('[img://] error for', req.url, e)\n" +
+    '      return new Response(`img error: ${(e as Error).message}`, { status: 500 })\n' +
+    '    }\n' +
+    '  })\n' +
+    '}\n'
+}{
+  file: 'main/settings.ts',
+  len: 7965,
+  snippet: "import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, chmodSync } from 'node:fs'\n" +
+    "import { join } from 'node:path'\n" +
+    "import { app } from 'electron'\n" +
+    "import { type AppSettings, DEFAULT_MODELS, DEFAULT_SETTINGS, ensureActive, newPresetId, normalizePreset, type Preset } from './presets'\n" +
+    "import { normalizeSkillList, normalizeSkillName, newSkillId, SKILL_CONTENT_MAX } from '../shared/skills'\n" +
+    "import { encryptApiKey, decryptApiKey, isEncryptedApiKey } from './secret'\n" +
+    '\n' +
+    'function settingsPath(): string {\n' +
+    "  return join(app.getPath('userData'), 'settings.json')\n" +
+    '}\n' +
+    '\n' +
+    '// API Key 只在「落盘」这一刻加密、「读取」这一刻解密：\n' +
+    '// macOS 下 safeStorage 底层走系统钥匙串，盘上不再出现明文 Key。\n' +
+    '// 应用内存 / 渲染进程里仍是明文，设置弹窗的编辑、reveal、复制都不受影响。\n' +
+    '// 两个函数都是幂等的：已加密串不会被二次加密，旧的明文 settings.json 也能平滑升级。\n' +
+    'function decryptPresets(s: AppSettings): AppSettings {\n' +
+    '  return {\n' +
+    '    ...s,\n' +
+    "    presets: (s.presets ?? []).map((p) => ({ ...p, apiKey: «redacted 13 chars»(p.apiKey ?? '') })),\n" +
+    '  }\n' +
+    '}\n' +
+    '\n' +
+    'function encryptPresets(s: AppSettings): AppSettings {\n' +
+    '  return {\n' +
+    '    ...s,\n' +
+    "    presets: (s.presets ?? []).map((p) => ({ ...p, apiKey: «redacted 13 chars»(p.apiKey ?? '') })),\n" +
+    '  }\n' +
+    '}\n' +
+    '\n' +
+    'export function loadSettings(): AppSettings {\n' +
+    '  const p = settingsPath()\n' +
+    '  if (!existsSync(p)) return ensureActive({ ...DEFAULT_SETTINGS })\n' +
+    '  try {\n' +
+    "    const raw = readFileSync(p, 'utf-8')\n" +
+    '    const parsed = JSON.parse(raw) as Partial<AppSettings> & {\n' +
+    '      baseUrl?: string; apiKey?: string; model?: string\n' +
+    "      imageFieldName?: 'image' | 'images' | 'image_url'\n" +
+    "      sizeMode?: 'computed' | 'square' | 'omit'\n" +
+    '      sendAspectRatio?: boolean\n' +
+    '    }\n' +
+    '    // 兼容 v1 单字段：把旧版 baseUrl/apiKey/model 全部塞到默认预设里\n' +
+    '    if (parsed.presets == null && (parsed.baseUrl || parsed.apiKey)) {\n' +
+    '      const legacy: Preset = normalizePreset({\n' +
+    "        id: 'default',\n" +
+    "        name: '默认预设',\n" +
+    "        baseUrl: parsed.baseUrl ?? '',\n" +
+    "        apiKey: «redacted 13 chars» ?? '',\n" +
+    '        pricePerImage: 0,\n' +
+    "        model: parsed.model || 'gpt-image-2',\n" +
+    "        imageFieldName: (parsed.imageFieldName ?? 'image') as Preset['imageFieldName'],\n" +
+    "        sizeMode: (parsed.sizeMode ?? 'computed') as Preset['sizeMode'],\n" +
+    '        sendAspectRatio: parsed.sendAspectRatio ?? true,\n' +
+    '      })\n' +
+    '      const ensured = ensureActive({ ...DEFAULT_SETTINGS, presets: [legacy], activePresetId: legacy.id })\n' +
+    '      // 老明文盘 → 立刻回写成加密盘，避免明文继续留在磁盘上\n' +
+    '      try { writeSettings(ensured) } catch { /* ignore */ }\n' +
+    '      return ensured\n' +
+    '    }\n' +
+    '    // 兼容旧版 settings.json：normalizeModels 缺字段/脏数据时都补默认列表\n' +
+    '    const models = normalizeModels(parsed.models)\n' +
+    '    const merged: AppSettings = { ...DEFAULT_SETTINGS, ...(parsed as Partial<AppSettings>), models }\n' +
+    '    const ensured = decryptPresets(ensureActive(merged))\n' +
+    '    // 关键修复：若旧盘上 models 字段缺失/非法，ensureActive 只在内存里补了默认，\n' +
+    '    // 不写盘会导致“每次加载看起来有 4 个、但删除永远删不掉”的幽灵列表。\n' +
+    '    // 这里一次性回填写盘，后续增删就有稳定的基准了。\n' +
+    '    // 顺带把「历史明文 Key」升级为加密盘（写回时统一加密）。\n' +
+    '    if (!Array.isArray(parsed.models) || (parsed.presets ?? []).some((p) => p?.apiKey && !isEncryptedApiKey(p.apiKey))) {\n' +
+    '      try { writeSettings(ensured) } catch { /* ignore */ }\n' +
+    '    }\n' +
+    '    return ensured\n' +
+    '  } catch {\n' +
+    '    return ensureActive({ ...DEFAULT_SETTINGS })\n' +
+    '  }\n' +
+    '}\n' +
+    '\n' +
+    'export function saveSettings(patch: Partial<AppSettings>): AppSettings {\n' +
+    '  const cur = loadSettings()\n' +
+    '  // saveSettings 是全量 patch 合并：若调用方没带 models，必须保留当前盘上的，\n' +
+    '  // 否则一次“只改 timeout”之类的保存就会把用户删过的模型又恢复出来。\n' +
+    '  const next = ensureActive({\n' +
+    '    ...cur,\n' +
+    '    ...patch,\n' +
+    '    models: patch.models === undefined ? cur.models : normalizeModels(patch.models),\n' +
+    '  })\n' +
+    '  writeSettings(next)\n' +
+    '  return next\n' +
+    '}\n' +
+    '\n' +
+    "export function addPreset(input: Omit<Preset, 'id'>): AppSettings {\n" +
+    '  const cur = loadSettings()\n' +
+    '  const p: Preset = normalizePreset({ ...input, id: newPresetId() })\n' +
+    '  const next: AppSettings = ensureActive({ ...cur, presets: [...cur.presets, p] })\n' +
+    '  writeSettings(next)\n' +
+    '  return next\n' +
+    '}\n' +
+    '\n' +
+    'export function updatePreset(p: Preset): AppSettings {\n' +
+    '  const cur = loadSettings()\n' +
+    '  const normalized = normalizePreset(p)\n' +
+    '  const next: AppSettings = ensureActive({\n' +
+    '    ...cur,\n' +
+    '    presets: cur.presets.map((x) => (x.id === normalized.id ? normalized : x)),\n' +
+    '  })\n' +
+    '  writeSettings(next)\n' +
+    '  return next\n' +
+    '}export function deletePreset(id: string): AppSettings {\n' +
+    '  const cur = loadSettings()\n' +
+    '  if (cur.presets.length <= 1) return cur   // 至少保留一条，避免空表\n' +
+    '  const presets = cur.presets.filter((p) => p.id !== id)\n' +
+    '  const activePresetId = cur.activePresetId === id ? presets[0]!.id : cur.activePresetId\n' +
+    '  const next: AppSettings = ensureActive({ ...cur, presets, activePresetId })\n' +
+    '  writeSettings(next)\n' +
+    '  return next\n' +
+    '}\n' +
+    '\n' +
+    'export function setActivePreset(id: string): AppSettings {\n' +
+    '  const cur = loadSettings()\n' +
+    '  if (!cur.presets.find((p) => p.id === id)) return cur\n' +
+    '  const next: AppSettings = ensureActive({ ...cur, activePresetId: id })\n' +
+    '  writeSettings(next)\n' +
+    '  return next\n' +
+    '}\n' +
+    '\n' +
+    '// ---------- Skills ----------\n' +
+    '// 上传入口：name 为空时调用方已按文件名推好默认名；同名视为“覆盖更新”\n' +
+    '// （保留原 id/createdAt，只换 content），不同名追加。\n' +
+    'export function addSkill(input: { name: string; content: string; sourceName?: string }): AppSettings {\n' +
+    '  const cur = loadSettings()\n' +
+    '  const name = normalizeSkillName(input.name)\n' +
+    "  const content = typeof input.content === 'string' ? input.content : ''\n" +
+    '  if (!name || !content.trim() || content.length > SKILL_CONTENT_MAX) return cur\n' +
+    '  const skills = normalizeSkillList(cur.skills)\n' +
+    "  const sourceName = typeof input.sourceName === 'string' ? input.sourceName : ''\n" +
+    '  const at = skills.findIndex((s) => s.name === name)\n' +
+    '  if (at >= 0) {\n' +
+    '    const prev = skills[at]!\n' +
+    '    skills[at] = { ...prev, content, sourceName, charCount: content.length }\n' +
+    '  } else {\n' +
+    '    skills.push({ id: newSkillId(), name, content, sourceName, charCount: content.length, createdAt: Date.now() })\n' +
+    '  }\n' +
+    '  const next: AppSettings = ensureActive({ ...cur, skills })\n' +
+    '  writeSettings(next)\n' +
+    '  return next\n' +
+    '}\n' +
+    '\n' +
+    'export function deleteSkill(id: string): AppSettings {\n' +
+    '  const cur = loadSettings()\n' +
+    '  const skills = normalizeSkillList(cur.skills)\n' +
+    '  if (!skills.some((s) => s.id === id)) return cur\n' +
+    '  const next: AppSettings = ensureActive({ ...cur, skills: skills.filter((s) => s.id !== id) })\n' +
+    '  writeSettings(next'
+}{
+  file: 'mcp/server.ts',
+  len: 8114,
+  snippet: '#!/usr/bin/env node\n' +
+    '// MCP 薄封装：stdio JSON-RPC 2.0，零新增依赖。\n' +
+    '// 参数校验、请求体组装、FIFO 串行、成本预估全部复用单核心，本文件只做协议编解码。\n' +
+    "import axios from 'axios'\n" +
+    "import { mkdirSync, writeFileSync } from 'node:fs'\n" +
+    "import { join } from 'node:path'\n" +
+    "import { createInterface } from 'node:readline'\n" +
+    "import { parseHeadlessParams, buildImageBody, estimatePayloadBytes } from '../shared/headless-schema'\n" +
+    "import type { PresetLike } from '../shared/headless-schema'\n" +
+    "import { generateQueue } from '../main/queue'\n" +
+    "import { costPreview } from '../main/cost'\n" +
+    "import type { ImageFieldName, SizeMode } from '../shared/types'\n" +
+    '\n' +
+    "const SERVER_NAME = 'gpt-image-studio'\n" +
+    "const SERVER_VERSION = '0.2.0'\n" +
+    "const PROTOCOL_VERSION = '2024-11-05'\n" +
+    'const MAX_PAYLOAD_BYTES = 20 * 1024 * 1024\n' +
+    '\n' +
+    'function env(key: string, fallback: string): string {\n' +
+    '  const v = process.env[key]\n' +
+    "  return v === undefined || v === '' ? fallback : v\n" +
+    '}\n' +
+    '\n' +
+    'function asImageField(v: string): ImageFieldName {\n' +
+    "  if (v === 'images' || v === 'image_url') return v\n" +
+    "  return 'image'\n" +
+    '}\n' +
+    '\n' +
+    'function asSizeMode(v: string): SizeMode {\n' +
+    "  if (v === 'square' || v === 'omit') return v\n" +
+    "  return 'computed'\n" +
+    '}\n' +
+    '\n' +
+    'const TOOLS = [\n' +
+    '  {\n' +
+    "    name: 'generate_image',\n" +
+    "    description: '用已配置的中转站生成图片并落盘到本地目录，返回文件路径与预估成本。',\n" +
+    '    inputSchema: {\n' +
+    "      type: 'object',\n" +
+    '      properties: {\n' +
+    "        prompt: { type: 'string', description: '提示词，必填' },\n" +
+    '        aspect: {\n' +
+    "          type: 'string',\n" +
+    "          enum: ['21:9', '16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16'],\n" +
+    "          description: '画面比例，默认 1:1',\n" +
+    '        },\n' +
+    "        resolution: { type: 'string', description: 'auto / 1K / 2K / 4K / WxH' },\n" +
+    '        quality: {\n' +
+    "          type: 'string',\n" +
+    "          enum: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],\n" +
+    "          description: '画质档；老四模型只认 auto/low/medium/high',\n" +
+    '        },\n' +
+    "        count: { type: 'integer', minimum: 1, maximum: 4, description: '张数，1-4' },\n" +
+    "        images: { type: 'array', items: { type: 'string' }, description: '参考图 base64 或 dataURL' },\n" +
+    "        complexity: { type: 'string', description: '原样透传给上游的可选字段' },\n" +
+    "        size: { type: 'string', description: '显式尺寸 WxH，给则覆盖自动计算' },\n" +
+    "        model: { type: 'string', description: '覆盖默认模型' },\n" +
+    "        dryRun: { type: 'boolean', description: '只返回请求体与成本，不真正发请求' },\n" +
+    '      },\n' +
+    "      required: ['prompt'],\n" +
+    '    },\n' +
+    '  },\n' +
+    ']\n' +
+    '\n' +
+    'function extractB64(raw: unknown): string[] {\n' +
+    '  const out: string[] = []\n' +
+    "  if (!raw || typeof raw !== 'object') return out\n" +
+    '  const root = raw as Record<string, unknown>\n' +
+    "  const data = root['data']\n" +
+    '  if (Array.isArray(data)) {\n' +
+    '    for (const item of data) {\n' +
+    "      if (!item || typeof item !== 'object') continue\n" +
+    "      const b64 = (item as Record<string, unknown>)['b64_json']\n" +
+    "      if (typeof b64 === 'string' && b64.length > 0) out.push(b64)\n" +
+    '    }\n' +
+    '  }\n' +
+    "  const top = root['b64_json']\n" +
+    "  if (typeof top === 'string' && top.length > 0) out.push(top)\n" +
+    '  else if (Array.isArray(top)) {\n' +
+    '    for (const v of top) {\n' +
+    "      if (typeof v === 'string' && v.length > 0) out.push(v)\n" +
+    '    }\n' +
+    '  }\n' +
+    '  return out\n' +
+    '}\n' +
+    '\n' +
+    'async function runGenerate(args: Record<string, unknown>): Promise<Record<string, unknown>> {\n' +
+    '  const model =\n' +
+    "    typeof args['model'] === 'string' && args['model'].length > 0\n" +
+    "      ? args['model']\n" +
+    "      : env('GPT_IMAGE_MODEL', 'gpt-image-2')\n" +
+    '  const parsed = parseHeadlessParams(args, model)\n' +
+    '  if (!parsed.ok) return { ok: false, message: parsed.message }\n' +
+    '  const params = parsed.params\n' +
+    '\n' +
+    '  const payloadBytes = estimatePayloadBytes(params.images)\n' +
+    '  if (payloadBytes > MAX_PAYLOAD_BYTES) {\n' +
+    '    return {\n' +
+    '      ok: false,\n' +
+    "      message: '参考图总体积 ' + (payloadBytes / 1024 / 1024).toFixed(1) + 'MB 过大（建议不超过 20MB）',\n" +
+    '    }\n' +
+    '  }\n' +
+    '\n' +
+    '  const preset: PresetLike = {\n' +
+    '    model: model,\n' +
+    "    imageFieldName: asImageField(env('GPT_IMAGE_IMAGE_FIELD', 'image')),\n" +
+    "    sizeMode: asSizeMode(env('GPT_IMAGE_SIZE_MODE', 'computed')),\n" +
+    "    sendAspectRatio: env('GPT_IMAGE_SEND_ASPECT', '1') !== '0',\n" +
+    '  }\n' +
+    '  const body = buildImageBody(params, preset, params.prompt)\n' +
+    "  const priceRaw = Number(env('GPT_IMAGE_PRICE', '0'))\n" +
+    '  const cost = costPreview(params.count, Number.isFinite(priceRaw) ? priceRaw : 0)\n' +
+    '\n' +
+    "  const baseUrl = env('GPT_IMAGE_BASE_URL', '').replace(/\\/$/, '')\n" +
+    "  const apiKey = env('GPT_IMAGE_API_KEY', '')\n" +
+    "  const dryRun = args['dryRun'] === true\n" +
+    '  if (dryRun || !baseUrl || !apiKey) {\n' +
+    '    return { ok: true, dryRun: true, body: body, cost: cost }\n' +
+    '  }\n' +
+    '\n' +
+    "  const timeoutRaw = Number(env('GPT_IMAGE_TIMEOUT_MS', '600000'))\n" +
+    '  const timeoutMs = Number.isFinite(timeoutRaw) ? timeoutRaw : 600000\n' +
+    '  const data = await generateQueue.enqueue(async () => {\n' +
+    "    const resp = await axios.post(baseUrl + '/v1/images/generations', body, {\n" +
+    "      headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },\n" +
+    '      timeout: timeoutMs,\n' +
+    '      maxBodyLength: Infinity,\n' +
+    '      maxContentLength: Infinity,\n' +
+    "      responseType: 'json',\n" +
+    '    })\n' +
+    '    return resp.data as unknown\n' +
+    '  })\n' +
+    '\n' +
+    '  const items = extractB64(data)\n' +
+    "  if (items.length === 0) return { ok: false, message: '未能从响应中识别到图片数据（b64_json）' }\n" +
+    '\n' +
+    "  const outDir = env('GPT_IMAGE_OUT', join(process.cwd(), 'output'))\n" +
+    '  mkdirSync(outDir, { recursive: true })\n' +
+    '  const stamp = Date.now()\n' +
+    '  const files: string[] = []\n' +
+    '  items.forEach((b64, index) => {\n' +
+    "    const file = join(outDir, stamp + '-' + index + '.png')\n" +
+    "    writeFileSync(file, Buffer.from(b64, 'base64'))\n" +
+    '    files.push(file)\n' +
+    '  })\n' +
+    '  return { ok: true, files: files, cost: cost, body: body }\n' +
+    '}\n' +
+    '\n' +
+    'function reply(id: unknown, result: unknown): void {\n' +
+    "  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: id, result: result }) + '\\n')\n" +
+    '}\n' +
+    '\n' +
+    'function replyError(id: unknown, code: number, message: string): void {\n' +
+    "  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: id, error: { code: code, message: message } }) + '\\n')\n" +
+    '}\n' +
+    '\n' +
+    'async function handle(msg: Record<string, unknown>): Promise<void> {\n' +
+    "  const method = typeof msg['method'] === 'string' ? msg['method'] : ''\n" +
+    "  const id = msg['id']\n" +
+    '  const hasId = id !== undefined && id !== null\n' +
+    "  const rawParams = msg['params']\n" +
+    "  const params = rawParams && typeof rawParams === 'object' ? (rawParams as Record<str"
+}{
+  file: 'renderer/components/CacheModal.tsx',
+  len: 7025,
+  snippet: "import { useEffect, useState } from 'react'\n" +
+    "import { useComposer } from '../state/useComposer'\n" +
+    "import type { CacheStats } from '@shared/types'\n" +
+    '\n' +
+    'export function formatBytes(n: number): string {\n' +
+    "  if (!Number.isFinite(n) || n < 0) return '—'\n" +
+    '  if (n < 1024) return `${n} B`\n' +
+    "  const units = ['KB', 'MB', 'GB']\n" +
+    '  let v = n / 1024\n' +
+    '  let u = 0\n' +
+    '  while (v >= 1024 && u < units.length - 1) {\n' +
+    '    v /= 1024\n' +
+    '    u += 1\n' +
+    '  }\n' +
+    '  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[u]}`\n' +
+    '}\n' +
+    '\n' +
+    '// 缓存清理弹窗：展示三项占用的体积，支持针对性清理。\n' +
+    '//   - 生成图：images/ 下的全部 plate 文件（清掉后历史条目保留，但图显示缺失）\n' +
+    '//   - 参考图快照：history.json 里内嵌的 refImages[].dataUrl（history.json 膨胀主因，\n' +
+    '//     剥离后历史/生成图都保留，只是老条目回填时不再恢复参考图）\n' +
+    '//   - 全部清空：生成图 + 历史索引（含快照），等价于 Clear\n' +
+    'export function CacheModal({ onClose }: { onClose: () => void }) {\n' +
+    '  const { refreshHistory } = useComposer()\n' +
+    '  const [stats, setStats] = useState<CacheStats | null>(null)\n' +
+    '  const [busy, setBusy] = useState<string | null>(null)\n' +
+    '\n' +
+    '  const reload = async () => {\n' +
+    '    const s = await window.api.getCacheStats()\n' +
+    '    setStats(s)\n' +
+    '  }\n' +
+    '\n' +
+    '  useEffect(() => {\n' +
+    '    void reload()\n' +
+    '  }, [])\n' +
+    '\n' +
+    "  const run = async (key: 'images' | 'refs' | 'all', fn: () => Promise<unknown>) => {\n" +
+    '    if (busy) return\n' +
+    '    setBusy(key)\n' +
+    '    try {\n' +
+    '      const res = await fn() as { entries?: unknown[]; stats?: CacheStats } | CacheStats\n' +
+    "      if (res && typeof res === 'object' && 'stats' in res && res.stats) {\n" +
+    '        setStats(res.stats)\n' +
+    '      } else {\n' +
+    '        await reload()\n' +
+    '      }\n' +
+    '      await refreshHistory()\n' +
+    '    } finally {\n' +
+    '      setBusy(null)\n' +
+    '    }\n' +
+    '  }\n' +
+    '\n' +
+    '  const confirmImages = async () => {\n' +
+    '    if (!stats || stats.imageCount === 0) return\n' +
+    '    if (!confirm(`删除全部 ${stats.imageCount} 张本地生成图（${formatBytes(stats.imageBytes)}）？\\n\\n历史条目会保留，但图片将无法预览。此操作不可恢复。`)) return\n' +
+    "    await run('images', () => window.api.clearGeneratedImages())\n" +
+    '  }\n' +
+    '\n' +
+    '  const confirmRefs = async () => {\n' +
+    '    if (!stats || stats.refCount === 0) return\n' +
+    '    if (!confirm(`剥离全部 ${stats.refCount} 张历史参考图快照（约 ${formatBytes(stats.refBytes)}）？\\n\\n生成图与历史记录都保留，只是老条目回填时不再恢复参考图。`)) return\n' +
+    "    await run('refs', () => window.api.clearRefCache())\n" +
+    '  }\n' +
+    '\n' +
+    '  const confirmAll = async () => {\n' +
+    "    if (!confirm(`清空全部缓存（${stats ? formatBytes(stats.totalBytes) : ''}）？\\n\\n包括：全部生成图 + 全部历史记录 + 参考图快照。此操作不可恢复。`)) return\n" +
+    "    await run('all', () => window.api.clearAllCache())\n" +
+    '  }\n' +
+    '\n' +
+    '  return (\n' +
+    '    <div role="dialog" aria-modal="true"\n' +
+    '      onClick={onClose}\n' +
+    '      style={{\n' +
+    "        position: 'fixed', inset: 0, background: 'rgba(20, 18, 15, 0.45)',\n" +
+    "        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',\n" +
+    "        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,\n" +
+    '      }}>\n' +
+    '      <div onClick={(e) => e.stopPropagation()}\n' +
+    '        style={{\n' +
+    "          width: 460, maxHeight: '85vh', overflow: 'auto',\n" +
+    "          background: 'var(--bg-card)', borderRadius: 'var(--r-md)',\n" +
+    "          border: '1px solid var(--line-strong)',\n" +
+    "          boxShadow: 'var(--shadow-pop)', padding: 28,\n" +
+    '        }}>\n' +
+    "        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>\n" +
+    '          <h2 style={{\n' +
+    "            margin: 0, fontFamily: 'var(--font-display)', fontStyle: 'italic',\n" +
+    "            fontSize: 26, fontWeight: 500, color: 'var(--text-1)', letterSpacing: '-0.01em',\n" +
+    '          }}>Cache</h2>\n' +
+    '          <span style={{\n' +
+    "            fontFamily: 'var(--font-mono)', fontSize: 10,\n" +
+    "            letterSpacing: 'var(--track-loose)', textTransform: 'uppercase',\n" +
+    "            color: 'var(--text-3)',\n" +
+    "          }}>Total {stats ? formatBytes(stats.totalBytes) : '…'}</span>\n" +
+    '        </div>\n' +
+    '        <div style={{\n' +
+    "          fontFamily: 'var(--font-mono)', fontSize: 10,\n" +
+    "          letterSpacing: 'var(--track-loose)', textTransform: 'uppercase',\n" +
+    "          color: 'var(--text-3)', marginBottom: 16,\n" +
+    '        }}>Storage · 清理缓存</div>\n' +
+    '\n' +
+    '        {!stats ? (\n' +
+    "          <div style={{ color: 'var(--text-3)', fontSize: 13 }}>正在统计…</div>\n" +
+    '        ) : (\n' +
+    "          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>\n" +
+    '            <CacheRow\n' +
+    '              title="生成图"\n' +
+    '              en="Generated plates"\n' +
+    '              detail={`${stats.imageCount} 张 · ${formatBytes(stats.imageBytes)}`}\n' +
+    "              actionLabel={busy === 'images' ? '清理中…' : '清理'}\n" +
+    '              disabled={stats.imageCount === 0 || busy !== null}\n' +
+    '              onAction={() => void confirmImages()}\n' +
+    '            />\n' +
+    '            <CacheRow\n' +
+    '              title="参考图快照"\n' +
+    '              en="Reference snapshots"\n' +
+    '              detail={`${stats.refCount} 张 · 约 ${formatBytes(stats.refBytes)}`}\n' +
+    "              actionLabel={busy === 'refs' ? '清理中…' : '清理'}\n" +
+    '              disabled={stats.refCount === 0 || busy !== null}\n' +
+    '              onAction={() => void confirmRefs()}\n' +
+    '            />\n' +
+    '            <CacheRow\n' +
+    '              title="历史索引"\n' +
+    '              en="History index"\n' +
+    '              detail={`${stats.historyCount} 条 · ${formatBytes(stats.historyBytes)}（含快照）`}\n' +
+    '              actionLabel="随全部清空"\n' +
+    '              disabled\n' +
+    '              onAction={() => {}}\n' +
+    '            />\n' +
+    '          </div>\n' +
+    '        )}\n' +
+    '\n' +
+    '        <div style={{\n' +
+    "          marginTop: 12, padding: 10, borderRadius: 'var(--r-sm)',\n" +
+    "          background: 'var(--bg-page)', border: '1px solid var(--line)',\n" +
+    "          fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6,\n" +
+    '        }}>\n' +
+    '          「全部清空」会删除生成图 + 历史记录 + 快照，等价于 Archive 的 Clear。\n' +
+    '          只想瘦身不清记录时，用上面两项针对性清理。\n' +
+    '        </div>\n' +
+    '\n' +
+    "        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20 }}>\n" +
+    '          <button type="button" className="pill danger"\n' +
+    '            disabled={busy !== null || !stats || stats.totalBytes === 0}\n' +
+    '            onClick={() => void confirmAll()}>\n' +
+    "            {busy === 'all' ? '清空中…' : '全部清空'}\n" +
+    '          </button>\n' +
+    '          <button type="button" className="pill" onClick={onClose}>完成</button>\n' +
+    '        </div>\n' +
+    '      </div>\n' +
+    '    </div>\n' +
+    '  )\n' +
+    '}\n' +
+    '\n' +
+    'function CacheRow({\n' +
+    '  title, en, detail, actionLabel, disabled, onAction,\n' +
+    '}: {\n' +
+    '  title: string; en: string; detail: string\n' +
+    '  actionLabel: string; disabled: boolean; onAction: () => void\n' +
+    '}'
+}{
+  file: 'renderer/components/HistoryPanel.tsx',
+  len: 5401,
+  snippet: "import { useState } from 'react'\n" +
+    "import type { MouseEvent } from 'react'\n" +
+    "import { useComposer } from '../state/useComposer'\n" +
+    "import { CacheModal } from './CacheModal'\n" +
+    "import { displayPrompt, skillNamesIn } from '../lib/skillTokens'\n" +
+    "import type { HistoryEntry } from '@shared/types'\n" +
+    '\n' +
+    '// Archive 列表分页步长：首屏 100 条，点“加载更多”每次 +100。\n' +
+    '// 只影响渲染挂载数，不影响数据（history 全量仍在内存 state 里）。\n' +
+    'const PAGE_SIZE = 100\n' +
+    '\n' +
+    'function formatWhen(ts: number): string {\n' +
+    '  const d = new Date(ts)\n' +
+    "  const pad = (n: number) => String(n).padStart(2, '0')\n" +
+    '  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}  ${pad(d.getHours())}:${pad(d.getMinutes())}`\n' +
+    '}\n' +
+    '\n' +
+    'function idxLabel(i: number, total: number): string {\n' +
+    '  // Show archive indices counting from oldest (=1) so the most recent is N.\n' +
+    '  // We render newest first; compute its display index as the total - i.\n' +
+    "  return String(total - i).padStart(4, '0')\n" +
+    '}\n' +
+    '\n' +
+    'export function HistoryPanel() {\n' +
+    '  const { state, refillFromHistory, refreshHistory } = useComposer()\n' +
+    '  const { history } = state\n' +
+    '  const [cacheOpen, setCacheOpen] = useState(false)\n' +
+    '  // 全量保存：历史不再截断。渲染侧分页展示（默认 100 条 + 加载更多），\n' +
+    '  // 避免几百条时一次性挂载全部 DOM 把列表拖卡。\n' +
+    '  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)\n' +
+    '\n' +
+    '  // 历史增删后把展示数 clamp 回合法区间：新增时保持用户已展开的数量，\n' +
+    '  // 删到不足一页时收回，避免“删完出现空白页”。\n' +
+    '  const total = history.length\n' +
+    '  const safeVisible = Math.min(Math.max(visibleCount, PAGE_SIZE), Math.max(total, PAGE_SIZE))\n' +
+    '  const visible = history.slice(0, safeVisible)\n' +
+    '  const hasMore = total > safeVisible\n' +
+    '\n' +
+    '  const showMore = () => setVisibleCount((c) => c + PAGE_SIZE)\n' +
+    '\n' +
+    '  const handleClear = async () => {\n' +
+    '    if (!confirm(`确认清空全部 ${history.length} 条历史记录？\\n\\n历史图片也会一并删除，此操作不可恢复。`)) return\n' +
+    '    await window.api.clearHistory()\n' +
+    '    await refreshHistory()\n' +
+    '  }\n' +
+    '\n' +
+    '  return (\n' +
+    '    <div className="archive">\n' +
+    '      <div className="archive-head">\n' +
+    '        <div className="archive-eyebrow">\n' +
+    `          Archive <span className="count">· {String(history.length).padStart(3, '0')}</span>\n` +
+    '        </div>\n' +
+    "        <div style={{ display: 'flex', gap: 6 }}>\n" +
+    '          <button type="button" className="pill" onClick={() => setCacheOpen(true)}>\n' +
+    '            Cache\n' +
+    '          </button>\n' +
+    '          <button type="button" className="pill" onClick={() => void refreshHistory()} title="失败置顶重试">\n' +
+    '            Retry\n' +
+    '          </button>\n' +
+    '          {history.length > 0 && (\n' +
+    '            <button type="button" className="pill danger" onClick={() => void handleClear()}>\n' +
+    '              Clear\n' +
+    '            </button>\n' +
+    '          )}\n' +
+    '        </div>\n' +
+    '      </div>\n' +
+    '\n' +
+    '      {history.length === 0 ? (\n' +
+    '        <div className="archive-list" style={{\n' +
+    "          aspectRatio: '1 / 1',\n" +
+    "          maxWidth: '100%',\n" +
+    "          display: 'flex', alignItems: 'center', justifyContent: 'center',\n" +
+    "          flexDirection: 'column', gap: 8,\n" +
+    '        }}>\n' +
+    '          <div style={{\n' +
+    "            fontFamily: 'var(--font-display)', fontStyle: 'italic',\n" +
+    "            fontSize: 24, color: 'var(--text-3)',\n" +
+    '          }}>empty archive</div>\n' +
+    '          <div className="output-empty">暂无输出 · Generate something to begin</div>\n' +
+    '          <div style={{\n' +
+    "            fontFamily: 'var(--font-mono)', fontSize: 10,\n" +
+    "            letterSpacing: 'var(--track-loose)', textTransform: 'uppercase',\n" +
+    "            color: 'var(--text-3)',\n" +
+    '          }}>Generate something to begin</div>\n' +
+    '        </div>\n' +
+    '      ) : (\n' +
+    `        <div className="archive-list" style={{ aspectRatio: '1 / 1', maxWidth: '100%' }}>\n` +
+    '          {visible.map((h, i) => (\n' +
+    '            <ArchiveRow\n' +
+    '              key={h.id}\n' +
+    '              entry={h}\n' +
+    '              displayIdx={idxLabel(i, total)}\n' +
+    '              onClick={() => refillFromHistory(h)}\n' +
+    '            />\n' +
+    '          ))}\n' +
+    '          {hasMore && (\n' +
+    '            <button type="button" className="archive-more" onClick={showMore}>\n' +
+    '              加载更多 · {total - safeVisible} / {total}\n' +
+    '            </button>\n' +
+    '          )}\n' +
+    '        </div>\n' +
+    '      )}\n' +
+    '      {cacheOpen && <CacheModal onClose={() => setCacheOpen(false)} />}\n' +
+    '    </div>\n' +
+    '  )\n' +
+    '}\n' +
+    '\n' +
+    'function ArchiveRow({\n' +
+    '  entry, displayIdx, onClick,\n' +
+    '}: { entry: HistoryEntry; displayIdx: string; onClick: () => void }) {\n' +
+    '  const { deleteHistoryEntry } = useComposer()\n' +
+    '\n' +
+    '  const handleDelete = async (e: MouseEvent) => {\n' +
+    '    e.stopPropagation()\n' +
+    "    if (!confirm(`删除这条历史？\\n\\n「${(displayPrompt(entry.promptRaw) || '(空提示词)').slice(0, 40)}」\\n其生成图文件也会一并回收（仍被其他条目引用时保留）。`)) return\n" +
+    '    await deleteHistoryEntry(entry.id)\n' +
+    '  }\n' +
+    '\n' +
+    '  const refCount = Array.isArray(entry.refImages) ? entry.refImages.length : 0\n' +
+    "  const skillCount = skillNamesIn(entry.promptRaw ?? '').length\n" +
+    '\n' +
+    '  return (\n' +
+    '    <div className="archive-item" onClick={onClick}>\n' +
+    '      <div className="idx">\n' +
+    '        №<br />\n' +
+    '        <span className="n">{displayIdx}</span>\n' +
+    '      </div>\n' +
+    '      <div className="ts">\n' +
+    '        {formatWhen(entry.createdAt)}\n' +
+    '        <span className="preset">{entry.presetName}</span>\n' +
+    '      </div>\n' +
+    '      <div className="body">\n' +
+    `        <div className="prompt">{displayPrompt(entry.promptRaw) || '(空提示词)'}</div>\n` +
+    '        <div className="params">\n' +
+    "          {entry.params.aspect} · {entry.params.resolution} · ×{entry.params.count} · {entry.images.length} plate{entry.images.length === 1 ? '' : 's'}{refCount > 0 ? ` · ${refCount} ref` : ''}{skillCount > 0 ? ` · ${skillCount} skill` : ''}\n" +
+    '        </div>\n' +
+    '      </div>\n' +
+    '      <button\n' +
+    '        type="button"\n' +
+    '        className="archive-del"\n' +
+    '        onClick={(e) => void handleDelete(e)}\n' +
+    '        aria-label="删除这条历史"\n' +
+    '        title="删除这条历史"\n' +
+    '      >×</button>\n' +
+    '    </div>\n' +
+    '  )\n' +
+    '}\n'
+}{
+  file: 'renderer/components/PreviewBox.tsx',
+  len: 23415,
+  snippet: "import { useEffect, useLayoutEffect, useRef, useState } from 'react'\n" +
+    "import { useComposer } from '../state/useComposer'\n" +
+    '\n' +
+    '// print-frame 边长：实测所在列的可用宽×行高后取 min（封顶 560px，防超大屏糊成一片）。\n' +
+    '// 不再写死 400：窗口拉大拉小，正方形永远取“当前空间里最大的合法边长”。\n' +
+    'function usePrintSize(colRef: React.RefObject<HTMLDivElement | null>): number {\n' +
+    '  const [size, setSize] = useState(400)\n' +
+    '  useLayoutEffect(() => {\n' +
+    '    const el = colRef.current\n' +
+    '    if (!el) return\n' +
+    '    const measure = () => {\n' +
+    '      const row = el.parentElement\n' +
+    "      const head = el.parentElement?.querySelector(':scope > .eyebrow')\n" +
+    '      const rowH = row?.clientHeight ?? 400\n' +
+    '      const headH = head instanceof HTMLElement ? head.offsetHeight : 28\n' +
+    '      const w = el.clientWidth\n' +
+    '      // 行高 - header - 列内 gap ≈ 正方形可用高度；列宽即宽度上限\n' +
+    '      const next = Math.max(200, Math.min(560, w, rowH - headH - 2))\n' +
+    '      setSize((prev) => (Math.abs(prev - next) < 1 ? prev : next))\n' +
+    '    }\n' +
+    '    measure()\n' +
+    '    const ro = new ResizeObserver(measure)\n' +
+    '    if (el.parentElement) ro.observe(el.parentElement)\n' +
+    '    ro.observe(el)\n' +
+    "    window.addEventListener('resize', measure)\n" +
+    '    return () => {\n' +
+    '      ro.disconnect()\n' +
+    "      window.removeEventListener('resize', measure)\n" +
+    '    }\n' +
+    '  }, [colRef])\n' +
+    '  return size\n' +
+    '}\n' +
+    '\n' +
+    'export function PreviewBox() {\n' +
+    '  const { state } = useComposer()\n' +
+    '  const { previewEntry, status, error } = state\n' +
+    '  const colRef = useRef<HTMLDivElement | null>(null)\n' +
+    '  const SIZE = Math.round(usePrintSize(colRef))\n' +
+    '  const images = previewEntry?.images ?? []\n' +
+    '  const [idx, setIdx] = useState(0)\n' +
+    '  // P1-5缩放下界：clamp(0.2,4.0)函数式更新，中心恒中，关闭重置\n' +
+    '  const [scale, setScale] = useState(1)\n' +
+    '  const clampScale = (v: number) => Math.min(4.0, Math.max(0.2, v));\n' +
+    "  const zoomBy = (d: number) => { console.log('[zoom] delta=', d); setScale((ss) => clampScale(Number((ss + d).toFixed(3)))); };\n" +
+    '  const [viewer, setViewer] = useState(false)\n' +
+    '\n' +
+    '  // When a new entry lands (or images go away), reset to first plate and\n' +
+    "  // close any open viewer so the UI doesn't get stuck on a stale image.\n" +
+    '  useEffect(() => {\n' +
+    '    setIdx(0)\n' +
+    '    setViewer(false)\n' +
+    '    setScale(1)\n' +
+    '  }, [previewEntry?.id])\n' +
+    '\n' +
+    '  // Keyboard navigation while the viewer is open.\n' +
+    '  useEffect(() => {\n' +
+    '    if (!viewer) return\n' +
+    '    const onKey = (e: KeyboardEvent) => {\n' +
+    "      if (e.key === 'Escape') setViewer(false)\n" +
+    "      else if (e.key === 'ArrowLeft')  setIdx((i) => (i - 1 + images.length) % images.length)\n" +
+    "      else if (e.key === 'ArrowRight') setIdx((i) => (i + 1) % images.length)\n" +
+    '    }\n' +
+    "    window.addEventListener('keydown', onKey)\n" +
+    "    return () => window.removeEventListener('keydown', onKey)\n" +
+    '  }, [viewer, images.length])\n' +
+    '\n' +
+    '  const current = images[idx]\n' +
+    "  const isLoading = status === 'loading'\n" +
+    '  const isEmpty = !isLoading && images.length === 0\n' +
+    '\n' +
+    '  // 缺失图兜底：生成图文件可能被“清理缓存”删掉（历史条目保留），\n' +
+    '  // 此时 <img> 会 error，用虚线占位代替破图图标。\n' +
+    '  const [broken, setBroken] = useState<Set<string>>(new Set())\n' +
+    '  useEffect(() => {\n' +
+    '    setBroken(new Set())\n' +
+    '  }, [previewEntry?.id])\n' +
+    '  const markBroken = (file: string) =>\n' +
+    '    setBroken((s) => {\n' +
+    '      if (s.has(file)) return s\n' +
+    '      const next = new Set(s)\n' +
+    '      next.add(file)\n' +
+    '      return next\n' +
+    '    })\n' +
+    '\n' +
+    '  // Save button.\n' +
+    '  //\n' +
+    '  //   count === 1  → single Save-As dialog with the proper .png filter\n' +
+    '  //                   (cleaner UX: user expects one file picker, not a\n' +
+    '  //                   directory picker, for a single image).\n' +
+    '  //   count  >  1  → directory picker, write every plate into the\n' +
+    '  //                   chosen folder in one shot (single-shot workflow).\n' +
+    '  const downloadAll = () => {\n' +
+    '    if (images.length === 0) return\n' +
+    '    if (images.length === 1) {\n' +
+    '      const first = images[0]\n' +
+    '      if (!first) return\n' +
+    '      void window.api.downloadHistoryFile(first.file)\n' +
+    '    } else {\n' +
+    '      void window.api.downloadHistoryFiles(images.map((i) => i.file))\n' +
+    '    }\n' +
+    '  }\n' +
+    '\n' +
+    '  const openAt = (i: number) => {\n' +
+    '    if (images.length === 0) return\n' +
+    '    setIdx(((i % images.length) + images.length) % images.length)\n' +
+    '    setViewer(true)\n' +
+    '  }\n' +
+    '\n' +
+    '  // -------- gallery (thumbnail) view --------\n' +
+    '  const box = (\n' +
+    `    <div className="print" ref={colRef} style={{ width: '100%' }}>\n` +
+    '      <div\n' +
+    '        className="print-frame"\n' +
+    "        style={{ width: SIZE, height: SIZE, padding: 0, position: 'relative' }}\n" +
+    '      >\n' +
+    '        {isLoading ? (\n' +
+    '          <Spinner />\n' +
+    '        ) : isEmpty ? (\n' +
+    '          <EmptyState error={error} />\n' +
+    '        ) : (\n' +
+    '          <div className="gallery" style={{ transform: `scale(${scale})`, transformOrigin: \'center center\' }}>\n' +
+    '        {/* P1-5缩放条 */}\n' +
+    '            {images.map((img, i) => (\n' +
+    '              <button\n' +
+    '                key={img.file}\n' +
+    '                type="button"\n' +
+    '                className="gallery-cell"\n' +
+    '                onClick={() => openAt(i)}\n' +
+    '                aria-label={`Open plate ${i + 1} of ${images.length}`}\n' +
+    '              >\n' +
+    '                {broken.has(img.file) ? (\n' +
+    '                  <span className="gallery-missing">missing file</span>\n' +
+    '                ) : (\n' +
+    `                  <img src={img.url} alt="" draggable={false} onError={(e) => { console.log('[file] img onError', img.file, (e.target as HTMLImageElement).src.slice(0, 120)); markBroken(img.file) }} />\n` +
+    '                )}\n' +
+    `                <span className="gallery-idx">{String(i + 1).padStart(2, '0')}</span>\n` +
+    '              </button>\n' +
+    '            ))}\n' +
+    '          </div>\n' +
+    '        )}\n' +
+    '\n' +
+    '        {!isEmpty && !isLoading && (\n' +
+    `          <div className="gallery-zoombar" style={{ position: 'absolute', right: 8, top: 8, display: 'flex', gap: 4 }}>\n` +
+    '            <button type="button" aria-label="缩小" onClick={(e) => { e.stopPropagation(); zoomBy(-0.2) }}>−</button>\n' +
+    '            <button type="button" aria-label="放大" onClick={(e) => { e.stopPropagation(); zoomBy(0.2) }}>＋</button>\n' +
+    `            <button type="button" aria-label="重置" onClick={(e) => { e.stopPropagation(); console.log('[zoom] reset'); setScale(1) }}>1:1</button>\n` +
+    '          </div>\n' +
+    '        )}\n' +
+    '        {/* Print label — sits on the frame border. */}\n' +
+    '        {current && (\n' +
+    '          <div className="print-index">\n' +
+    "            Print № <strong>{images.length ? '0001' : '----'}</strong>\n" +
+    '          </div>\n' +
+    '        )}\n' +
+    '\n' +
+    '   '
+}{
+  file: 'renderer/components/SettingsModal.tsx',
+  len: 13994,
+  snippet: "import { useState } from 'react'\n" +
+    "import { useComposer } from '../state/useComposer'\n" +
+    "import type { ImageFieldName, Preset, SizeMode } from '@shared/types'\n" +
+    '\n' +
+    "const EMPTY: Omit<Preset, 'id'> = {\n" +
+    "  name: '',\n" +
+    "  baseUrl: '',\n" +
+    "  apiKey: '',\n" +
+    '  pricePerImage: 0,\n' +
+    "  model: 'gpt-image-2',\n" +
+    "  imageFieldName: 'image',\n" +
+    "  sizeMode: 'computed',\n" +
+    '  sendAspectRatio: true,\n' +
+    '}\n' +
+    '\n' +
+    'export function SettingsModal({ onClose }: { onClose: () => void }) {\n' +
+    '  const { state, reloadSettings } = useComposer()\n' +
+    '  const presets = state.settings.presets\n' +
+    '  const activeId = state.settings.activePresetId\n' +
+    '  const models = state.settings.models ?? []\n' +
+    "  const [editing, setEditing] = useState<Preset | Omit<Preset, 'id'> | null>(null)\n" +
+    "  const [newModel, setNewModel] = useState('')\n" +
+    '  const [modelError, setModelError] = useState<string | null>(null)\n' +
+    '  const [modelPending, setModelPending] = useState<string | null>(null)\n' +
+    '\n' +
+    '  const addModelEntry = async (name: string) => {\n' +
+    '    const trimmed = name.trim()\n' +
+    '    if (!trimmed) return\n' +
+    '    setModelError(null)\n' +
+    '    try {\n' +
+    '      await window.api.addModel(trimmed)\n' +
+    "      setNewModel('')\n" +
+    '      await reloadSettings()\n' +
+    '    } catch (e) {\n' +
+    "      setModelError(e instanceof Error ? e.message : '添加模型失败')\n" +
+    '    }\n' +
+    '  }\n' +
+    '\n' +
+    '  const removeModelEntry = async (name: string) => {\n' +
+    '    if (models.length <= 1) {\n' +
+    "      setModelError('至少需要保留一个模型')\n" +
+    '      setModelPending(null)\n' +
+    '      return\n' +
+    '    }\n' +
+    '    setModelError(null)\n' +
+    '    try {\n' +
+    '      await window.api.deleteModel(name)\n' +
+    '      setModelPending(null)\n' +
+    '      await reloadSettings()\n' +
+    '    } catch (e) {\n' +
+    "      setModelError(e instanceof Error ? e.message : '删除模型失败')\n" +
+    '    }\n' +
+    '  }\n' +
+    '\n' +
+    "  const saveEdit = async (p: Preset | Omit<Preset, 'id'>) => {\n" +
+    "    if ('id' in p && p.id) {\n" +
+    '      await window.api.updatePreset(p as Preset)\n' +
+    '    } else {\n' +
+    '      await window.api.addPreset(p)\n' +
+    '    }\n' +
+    '    await reloadSettings()\n' +
+    '    setEditing(null)\n' +
+    '  }\n' +
+    '\n' +
+    '  const handleDelete = async (id: string, name: string) => {\n' +
+    '    if (presets.length <= 1) {\n' +
+    "      alert('至少需要保留一个预设')\n" +
+    '      return\n' +
+    '    }\n' +
+    '    if (!confirm(`确认删除预设「${name}」？`)) return\n' +
+    '    await window.api.deletePreset(id)\n' +
+    '    await reloadSettings()\n' +
+    '  }\n' +
+    '\n' +
+    '  return (\n' +
+    '    <div role="dialog" aria-modal="true"\n' +
+    '      onClick={onClose}\n' +
+    '      style={{\n' +
+    "        position: 'fixed', inset: 0, background: 'rgba(20, 18, 15, 0.45)',\n" +
+    "        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',\n" +
+    "        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,\n" +
+    '      }}>\n' +
+    '      <div onClick={(e) => e.stopPropagation()}\n' +
+    '        style={{\n' +
+    "          width: 580, maxHeight: '85vh', overflow: 'auto',\n" +
+    "          background: 'var(--bg-card)', borderRadius: 'var(--r-md)',\n" +
+    "          border: '1px solid var(--line-strong)',\n" +
+    "          boxShadow: 'var(--shadow-pop)', padding: 28,\n" +
+    '        }}>\n' +
+    "        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 20 }}>\n" +
+    '          <h2 style={{\n' +
+    "            margin: 0, fontFamily: 'var(--font-display)', fontStyle: 'italic',\n" +
+    "            fontSize: 28, fontWeight: 500, color: 'var(--text-1)', letterSpacing: '-0.01em',\n" +
+    '          }}>Presets & Settings</h2>\n' +
+    '          <button type="button" className="pill" onClick={() => setEditing({ ...EMPTY })}>+ Add</button>\n' +
+    '        </div>\n' +
+    '\n' +
+    "        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>\n" +
+    '          {presets.map((p) => (\n' +
+    '            <PresetRow\n' +
+    '              key={p.id}\n' +
+    '              preset={p}\n' +
+    '              isActive={p.id === activeId}\n' +
+    '              canDelete={presets.length > 1}\n' +
+    '              onEdit={() => setEditing(p)}\n' +
+    '              onDelete={() => void handleDelete(p.id, p.name)}\n' +
+    '            />\n' +
+    '          ))}\n' +
+    '        </div>\n' +
+    '\n' +
+    "        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>\n" +
+    '          <button type="button" className="pill" onClick={onClose}>完成</button>\n' +
+    '        </div>\n' +
+    '\n' +
+    "        <div style={{ marginTop: 20, borderTop: '1px solid var(--rule)', paddingTop: 16 }}>\n" +
+    '          <div className="field-label" style={{ marginBottom: 8 }}>全局模型列表 · Models</div>\n' +
+    "          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>\n" +
+    '            {models.map((m) => (\n' +
+    '              <span key={m} style={{\n' +
+    "                display: 'inline-flex', alignItems: 'center', gap: 6,\n" +
+    "                border: modelPending === m ? '1px solid var(--danger)' : '1px solid var(--line)',\n" +
+    "                background: modelPending === m ? 'var(--danger-soft)' : 'transparent',\n" +
+    '                borderRadius: 999,\n' +
+    "                padding: '3px 4px 3px 10px',\n" +
+    "                fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-1)',\n" +
+    '              }}>\n' +
+    '                {m}\n' +
+    '                {models.length > 1 && (\n' +
+    `                  <button type="button" className="pill" style={{ padding: '1px 8px' }}\n` +
+    "                    title={modelPending === m ? '再点一次取消' : `移除 ${m}`}\n" +
+    '                    onClick={() => {\n' +
+    '                      if (modelPending === m) setModelPending(null)\n' +
+    '                      else { setModelError(null); setModelPending(m) }\n' +
+    '                    }}\n' +
+    '                  >×</button>\n' +
+    '                )}\n' +
+    '              </span>\n' +
+    '            ))}\n' +
+    '          </div>\n' +
+    '          {modelPending && (\n' +
+    '            <div style={{\n' +
+    "              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,\n" +
+    "              border: '1px solid rgba(184, 36, 45, 0.4)', background: 'var(--danger-soft)',\n" +
+    "              borderRadius: 'var(--r-sm)', padding: '6px 8px', marginBottom: 10,\n" +
+    "              fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--danger)',\n" +
+    '            }}>\n' +
+    '              <span>移除「{modelPending}」？</span>\n' +
+    "              <span style={{ display: 'flex', gap: 4 }}>\n" +
+    `                <button type="button" className="pill danger" style={{ padding: '3px 8px' }}\n` +
+    '                  onClick={() => void removeModelEntry(modelPending)}>确认删除</button>\n' +
+    `                <button type="button" className="pill" style={{ padding: '3px 8px' }}\n` +
+    '                  onClick={() => setModelPending(null)}>取消</button>\n' +
+    '              </span>\n' +
+    '            '
+}{
+  file: 'renderer/lib/refTokens.ts',
+  len: 2203,
+  snippet: "import type { RefImage } from '@shared/types'\n" +
+    '\n' +
+    'const TOKEN_RE = /@(?:参考图|图)\\s*(\\d+)?/g\n' +
+    '\n' +
+    'export interface ResolveResult {\n' +
+    '  text: string\n' +
+    '  referenced: number[]\n' +
+    '  errors: string[]\n' +
+    '  warnings: string[]\n' +
+    '}\n' +
+    '\n' +
+    '/**\n' +
+    ' * Resolve @图N tokens in the user prompt.\n' +
+    ' *\n' +
+    ' * - Always send every uploaded image, in index order (positional alignment invariant).\n' +
+    ' * - 1 image: strip tokens (no disambiguation needed; the model gets one image).\n' +
+    ' * - 2+ images: replace `@图N` with `第N张参考图` so multi-image referents stay\n' +
+    " *   disambiguated in natural prose — and the literal sigil doesn't get baked\n" +
+    ' *   into the generated image.\n' +
+    ' */\n' +
+    'export function resolvePrompt(raw: string, refs: RefImage[]): ResolveResult {\n' +
+    '  const errors: string[] = []\n' +
+    '  const warnings: string[] = []\n' +
+    '  const referenced = new Set<number>()\n' +
+    '\n' +
+    '  if (refs.length === 0) {\n' +
+    '    // No images uploaded; just strip any stray tokens and report errors.\n' +
+    "    const cleaned = raw.replace(TOKEN_RE, '').replace(/\\s{2,}/g, ' ').trim()\n" +
+    '    if (/@(参考图|图)/.test(raw)) {\n' +
+    "      errors.push('提示词包含 @图N 但未上传参考图')\n" +
+    '    }\n' +
+    '    return { text: cleaned, referenced: [], errors, warnings }\n' +
+    '  }\n' +
+    '\n' +
+    '  if (refs.length === 1) {\n' +
+    '    // Strip tokens; collapse whitespace.\n' +
+    '    let cleaned = raw.replace(TOKEN_RE, (m, n) => {\n' +
+    '      const idx = n ? parseInt(n, 10) : 1\n' +
+    '      if (idx !== 1) {\n' +
+    '        errors.push(`提示词引用了 @图${idx}，但只上传了 1 张参考图`)\n' +
+    '      } else {\n' +
+    '        referenced.add(1)\n' +
+    '      }\n' +
+    "      return ''\n" +
+    '    })\n' +
+    "    cleaned = cleaned.replace(/[ \\t]{2,}/g, ' ').replace(/([一-龥]) ([一-龥])/g, '$1$2').trim()\n" +
+    '    return { text: cleaned, referenced: Array.from(referenced), errors, warnings }\n' +
+    '  }\n' +
+    '\n' +
+    '  // 2+ images: substitute with `第N张参考图`.\n' +
+    '  let text = raw.replace(TOKEN_RE, (_m, n) => {\n' +
+    '    const idx = n ? parseInt(n, 10) : 1\n' +
+    '    if (idx < 1 || idx > refs.length) {\n' +
+    '      errors.push(`提示词引用了 @图${idx}，但只上传了 ${refs.length} 张参考图`)\n' +
+    "      return ''\n" +
+    '    }\n' +
+    '    referenced.add(idx)\n' +
+    '    return `第${idx}张参考图`\n' +
+    '  })\n' +
+    '\n' +
+    '  // Tidy stray spaces.\n' +
+    "  text = text.replace(/[ \\t]{2,}/g, ' ').trim()\n" +
+    '\n' +
+    '  // Warn about un-referenced images.\n' +
+    '  for (let i = 1; i <= refs.length; i++) {\n' +
+    '    if (!referenced.has(i)) warnings.push(`图${i} 未在提示词中引用`)\n' +
+    '  }\n' +
+    '\n' +
+    '  return { text, referenced: Array.from(referenced), errors, warnings }\n' +
+    '}\n'
+}{
+  file: 'renderer/state/useComposer.tsx',
+  len: 13109,
+  snippet: 'import {\n' +
+    '  createContext, useContext, useEffect, useMemo, useReducer, useRef,\n' +
+    "} from 'react'\n" +
+    "import type { ReactNode } from 'react'\n" +
+    'import type {\n' +
+    '  AspectRatio, Count, GeneratedImage, GenerateParams, GenerateRequest,\n' +
+    '  HistoryEntry, Preset, Quality, RefImage, Resolution,\n' +
+    "} from '@shared/types'\n" +
+    "import { DEFAULT_SETTINGS, getSupportedQualities, normalizeQuality, normalizeResolution, type AppSettings } from '@shared/types'\n" +
+    "import { TEMPLATES, type TemplateId } from '../data/templates'\n" +
+    '\n' +
+    "type Status = 'idle' | 'loading' | 'error'\n" +
+    '\n' +
+    'interface ComposerState {\n' +
+    '  prompt: string\n' +
+    '  params: GenerateParams\n' +
+    '  refImages: RefImage[]\n' +
+    '  status: Status\n' +
+    '  activeRequestId?: string\n' +
+    '  error?: { code: string; message: string; body?: string }\n' +
+    '  results: GeneratedImage[]\n' +
+    '  history: HistoryEntry[]\n' +
+    '  settings: AppSettings\n' +
+    '  // 当前预览条目（生成的新结果，或历史回填）。previewEntry.images 决定 PreviewBox 渲染哪些图\n' +
+    '  previewEntry?: HistoryEntry\n' +
+    '}\n' +
+    '\n' +
+    'type Action =\n' +
+    "  | { type: 'set-prompt'; value: string }\n" +
+    "  | { type: 'set-param'; key: keyof GenerateParams; value: GenerateParams[keyof GenerateParams] }\n" +
+    "  | { type: 'apply-template'; id: TemplateId }\n" +
+    "  | { type: 'set-refs'; refs: RefImage[] }\n" +
+    "  | { type: 'set-status'; status: Status; error?: ComposerState['error']; requestId?: string }\n" +
+    "  | { type: 'set-results'; results: GeneratedImage[]; entry?: HistoryEntry }\n" +
+    "  | { type: 'set-history'; history: HistoryEntry[] }\n" +
+    "  | { type: 'set-settings'; settings: AppSettings }\n" +
+    "  | { type: 'set-preview'; entry: HistoryEntry | undefined }\n" +
+    '\n' +
+    "const INITIAL_PARAMS: GenerateParams = { aspect: '1:1', resolution: 'auto', quality: 'auto', count: 1 }\n" +
+    '\n' +
+    'const initialState: ComposerState = {\n' +
+    "  prompt: '',\n" +
+    '  params: INITIAL_PARAMS,\n' +
+    '  refImages: [],\n' +
+    "  status: 'idle',\n" +
+    '  error: undefined,\n' +
+    '  results: [],\n' +
+    '  history: [],\n' +
+    '  settings: DEFAULT_SETTINGS,\n' +
+    '}\n' +
+    '\n' +
+    'function reducer(state: ComposerState, action: Action): ComposerState {\n' +
+    '  switch (action.type) {\n' +
+    "    case 'set-prompt': return { ...state, prompt: action.value }\n" +
+    "    case 'set-param': return { ...state, params: { ...state.params, [action.key]: action.value } }\n" +
+    "    case 'apply-template': {\n" +
+    '      const t = TEMPLATES.find((x) => x.id === action.id)\n' +
+    '      return t ? { ...state, prompt: t.text } : state\n' +
+    '    }\n' +
+    "    case 'set-refs': return { ...state, refImages: action.refs }\n" +
+    "    case 'set-status':\n" +
+    '      return {\n' +
+    '        ...state,\n' +
+    '        status: action.status,\n' +
+    '        error: action.error,\n' +
+    "        activeRequestId: action.status === 'loading' ? action.requestId : undefined,\n" +
+    '      }\n' +
+    "    case 'set-results':\n" +
+    '      return { ...state, results: action.results, previewEntry: action.entry, activeRequestId: undefined }\n' +
+    "    case 'set-history': return { ...state, history: action.history }\n" +
+    "    case 'set-settings': return { ...state, settings: action.settings }\n" +
+    "    case 'set-preview': return { ...state, previewEntry: action.entry, results: action.entry?.images ?? [] }\n" +
+    '    default: return state\n' +
+    '  }\n' +
+    '}\n' +
+    '\n' +
+    'interface ComposerApi {\n' +
+    '  state: ComposerState\n' +
+    '  setPrompt(v: string): void\n' +
+    '  setParam(key: keyof GenerateParams, value: AspectRatio | Resolution | Quality | Count): void\n' +
+    '  applyTemplate(id: TemplateId): void\n' +
+    '  insertSkill(name: string): void\n' +
+    '  setRefs(refs: RefImage[]): void\n' +
+    '  runGenerate(promptResolved: string): Promise<void>\n' +
+    '  cancelGenerate(): Promise<void>\n' +
+    '  refreshHistory(): Promise<void>\n' +
+    '  reloadSettings(): Promise<void>\n' +
+    '  setActivePreset(id: string): Promise<void>\n' +
+    '  setPresetModel(id: string, model: string): Promise<void>\n' +
+    '  addModel(name: string): Promise<void>\n' +
+    '  deleteModel(name: string): Promise<void>\n' +
+    '  addSkill(input: { name: string; content: string; sourceName?: string }): Promise<void>\n' +
+    '  deleteSkill(id: string): Promise<void>\n' +
+    '  saveSettings(patch: Partial<AppSettings>): Promise<void>\n' +
+    '  deleteHistoryEntry(id: string): Promise<void>\n' +
+    '  refillFromHistory(h: HistoryEntry): void\n' +
+    '}\n' +
+    '\n' +
+    'const ComposerContext = createContext<ComposerApi | null>(null)\n' +
+    '\n' +
+    'export function ComposerProvider({ children }: { children: ReactNode }) {\n' +
+    '  const [state, dispatch] = useReducer(reducer, initialState)\n' +
+    '  // 最新 state 的 ref：runGenerate 是异步的，await 之后闭包里的 state 会过期，\n' +
+    '  // 用 ref 拿“发起时的 prompt/params/refImages”快照，避免竞态。\n' +
+    '  const stateRef = useRef(state)\n' +
+    '  stateRef.current = state\n' +
+    '\n' +
+    '  useEffect(() => {\n' +
+    '    if (!window.api) return\n' +
+    "    void window.api.getSettings().then((s) => dispatch({ type: 'set-settings', settings: s }))\n" +
+    "    void window.api.listHistory().then((h) => dispatch({ type: 'set-history', history: h }))\n" +
+    '  }, [])\n' +
+    '\n' +
+    '  const api: ComposerApi = useMemo(() => ({\n' +
+    '    state,\n' +
+    "    setPrompt(v) { dispatch({ type: 'set-prompt', value: v }) },\n" +
+    "    setParam(key, value) { dispatch({ type: 'set-param', key: key as keyof GenerateParams, value: value as never }) },\n" +
+    "    applyTemplate(id) { dispatch({ type: 'apply-template', id }) },\n" +
+    '    // 点击右上角 skill → 在 prompt 末尾追加一个 skill token（`⟦skill:NAME⟧ `）。\n' +
+    '    // 重复点击同一 skill 不重复追加；PromptEditor 会把它 render 成红色胶囊。\n' +
+    '    // 用空格分隔（不用换行）：编辑器的文本模型里 <br> 不占字符，\n' +
+    '    // 换行分隔的 token 在回解析时容易粘连——空格能完整 surviving。\n' +
+    '    insertSkill(name) {\n' +
+    '      const token = `⟦skill:${name}⟧`\n' +
+    '      const cur = stateRef.current.prompt\n' +
+    '      if (cur.includes(token)) return\n' +
+    "      const sep = cur.length === 0 || /[\\s]$/.test(cur) ? '' : ' '\n" +
+    "      dispatch({ type: 'set-prompt', value: `${cur}${sep}${token} ` })\n" +
+    '    },\n' +
+    "    setRefs(refs) { dispatch({ type: 'set-refs', refs }) },\n" +
+    '    async runGenerate(promptResolved: string) {\n' +
+    '      // P0 并发互斥（前端同步锁）：dispatch 是同步的，所以这个判断+占位是原子的——\n' +
+    '      // 连点、快捷键重入、React 18 StrictMode 双调用都只会放行第一个。\n' +
+    '      // main 侧还有第二道 busy 锁（防多窗口/未来多入口），此处是主防线。\n' +
+    "      if (stateRef.current.status === 'loading' || stateRef.current.activeRequestId) return\n" +
+    '      const snap = stateRef.current\n' +
+    '      const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`\n' +
+    '      const req: GenerateRequest = {\n' +
+    '        requestId,\n' +
+    '        promptRaw: snap.prompt,\n' +
+    '        promptResolved,\n' +
+    '        params: snap.params,\n' +
+    '        images: snap.refImages.map((r) => r.dataUrl),\n' +
+    '        // 参考图快照随请求发给 main，落盘进历史，回填时可直接恢复\n' +
+    '        refImages: snap.refImages.map((r, i) => ({ ...r, index: i + '
+}{
+  file: 'shared/headless-schema.ts',
+  len: 4499,
+  snippet: '// headless-schema.ts — 单核心唯一参数校验 + Body组装\n' +
+    '// CLI/MCP/Electron三端唯一入口。只校验不二次封装。\n' +
+    "import type { AspectRatio, Count, Quality, Resolution, ImageFieldName, SizeMode } from './types';\n" +
+    "import { QUALITY_ALL, getSupportedQualities } from './types';\n" +
+    "import { sizeString } from './size';\n" +
+    '\n' +
+    'export interface HeadlessInput {\n' +
+    '  prompt?: unknown; aspect?: unknown; resolution?: unknown;\n' +
+    '  quality?: unknown; count?: unknown; images?: unknown;\n' +
+    '  complexity?: unknown; size?: unknown; model?: unknown;\n' +
+    '}\n' +
+    'export interface HeadlessParams {\n' +
+    '  prompt: string; aspect: AspectRatio; resolution: Resolution;\n' +
+    '  quality: Quality; count: Count; images: string[];\n' +
+    '  complexity?: string; sizeOverride?: string; modelOverride?: string;\n' +
+    '}\n' +
+    'export interface PresetLike {\n' +
+    '  model: string; imageFieldName: ImageFieldName;\n' +
+    '  sizeMode: SizeMode; sendAspectRatio: boolean;\n' +
+    '}\n' +
+    "const ASPECTS: AspectRatio[] = ['21:9','16:9','3:2','4:3','1:1','3:4','2:3','9:16'];\n" +
+    'export function isAspect(v: unknown): v is AspectRatio {\n' +
+    "  return typeof v === 'string' && (ASPECTS as string[]).includes(v);\n" +
+    '}\n' +
+    'export function isResolution(v: unknown): v is Resolution {\n' +
+    "  if (v === 'auto' || v === '1K' || v === '2K' || v === '4K' || v === '6K' || v === '8K') return true;\n" +
+    "  return typeof v === 'string' && /^\\d+x\\d+$/.test(v);\n" +
+    '}\n' +
+    'export function isQuality(v: unknown, model?: string): v is Quality {\n' +
+    '  const allowed = model ? getSupportedQualities(model) : QUALITY_ALL;\n' +
+    "  return typeof v === 'string' && (allowed as string[]).includes(v);\n" +
+    '}\n' +
+    'export function isCount(v: unknown): v is Count {\n' +
+    '  return v === 1 || v === 2 || v === 3 || v === 4;\n' +
+    '}\n' +
+    'export function parseHeadlessParams(input: HeadlessInput, model?: string): { ok: true; params: HeadlessParams } | { ok: false; message: string } {\n' +
+    "  const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';\n" +
+    "  if (!prompt) return { ok: false, message: 'prompt 不能为空' };\n" +
+    "  if (prompt.length > 8000) return { ok: false, message: 'prompt 超长（限8000字符）' };\n" +
+    "  const aspect = input.aspect ?? '1:1';\n" +
+    "  if (!isAspect(aspect)) return { ok: false, message: '非法 aspect' };\n" +
+    "  const resolution = input.resolution ?? 'auto';\n" +
+    "  if (!isResolution(resolution)) return { ok: false, message: '非法 resolution，仅支持 auto/1K/2K/4K/6K/8K/WxH' };\n" +
+    "  const m = model ?? (typeof input.model === 'string' ? input.model : undefined);\n" +
+    "  const quality = input.quality ?? 'medium';\n" +
+    "  if (!isQuality(quality, m)) return { ok: false, message: '非法 quality，老四模型仅 auto/low/medium/high，2.6支持六档' };\n" +
+    '  const count = input.count ?? 1;\n' +
+    "  if (!isCount(count)) return { ok: false, message: '非法 count，仅支持 1-4' };\n" +
+    '  let images: string[] = [];\n' +
+    '  if (input.images !== undefined) {\n' +
+    "    if (!Array.isArray(input.images)) return { ok: false, message: 'images 必须为 string[]' };\n" +
+    '    for (const s of input.images) {\n' +
+    "      if (typeof s !== 'string' || s.length === 0) return { ok: false, message: 'images 元素必须非空字符串' };\n" +
+    '    }\n' +
+    '    images = input.images as string[];\n' +
+    '  }\n' +
+    '  const out: HeadlessParams = { prompt, aspect, resolution: resolution as Resolution, quality: quality as Quality, count: count as Count, images };\n' +
+    '  if (input.complexity !== undefined) {\n' +
+    "    if (typeof input.complexity !== 'string' || !input.complexity || input.complexity.length > 64)\n" +
+    "      return { ok: false, message: '非法 complexity（透传字符串）' };\n" +
+    '    out.complexity = input.complexity;\n' +
+    '  }\n' +
+    '  if (input.size !== undefined) {\n' +
+    "    if (typeof input.size !== 'string' || !input.size || input.size.length > 32)\n" +
+    "      return { ok: false, message: '非法 size（透传字符串）' };\n" +
+    '    out.sizeOverride = input.size;\n' +
+    '  }\n' +
+    "  if (typeof input.model === 'string' && input.model.trim()) out.modelOverride = input.model.trim().slice(0, 120);\n" +
+    '  return { ok: true, params: out };\n' +
+    '}\n' +
+    'export function buildImageBody(p: HeadlessParams, preset: PresetLike, promptResolved: string): Record<string, unknown> {\n' +
+    '  const model = p.modelOverride || preset.model;\n' +
+    '  const body: Record<string, unknown> = { model, prompt: promptResolved, n: p.count };\n' +
+    "  if (p.quality !== 'auto') (body as Record<string, unknown>).quality = p.quality;\n" +
+    '  const size = p.sizeOverride ?? sizeString(p.aspect, p.resolution, preset.sizeMode);\n' +
+    '  if (size) body.size = size;\n' +
+    '  if (preset.sendAspectRatio) body.aspect_ratio = p.aspect;\n' +
+    '  if (p.complexity !== undefined) body.complexity = p.complexity;\n' +
+    '  if (p.images.length > 0) body[preset.imageFieldName] = p.images.length === 1 ? p.images[0] : p.images;\n' +
+    '  return body;\n' +
+    '}\n' +
+    'export function estimatePayloadBytes(images: string[]): number {\n' +
+    '  return images.reduce((s, x) => s + Math.floor(x.length * 0.75), 0);\n' +
+    '}\n'
+}{
+  file: 'shared/ipc.ts',
+  len: 2090,
+  snippet: 'import type {\n' +
+    '  AppSettings,\n' +
+    '  CacheStats,\n' +
+    '  GenerateRequest,\n' +
+    '  GenerateResult,\n' +
+    '  HistoryEntry,\n' +
+    '  Preset,\n' +
+    "} from './types'\n" +
+    '\n' +
+    'export const CH = {\n' +
+    "  settingsGet: 'settings:get',\n" +
+    "  settingsSet: 'settings:set',\n" +
+    "  modelsAdd: 'models:add',\n" +
+    "  modelsDelete: 'models:delete',\n" +
+    '  // 预设 CRUD + 激活切换\n' +
+    "  presetsAdd: 'presets:add',\n" +
+    "  presetsUpdate: 'presets:update',\n" +
+    "  presetsDelete: 'presets:delete',\n" +
+    "  presetsSetActive: 'presets:setActive',\n" +
+    '  // Skills：上传（同名覆盖） + 删除\n' +
+    "  skillsAdd: 'skills:add',\n" +
+    "  skillsDelete: 'skills:delete',\n" +
+    '  // 历史：清空 + 下载原图（单张或全部）\n' +
+    "  historyClear: 'history:clear',\n" +
+    "  historyDownload: 'history:download',\n" +
+    "  historyDownloadAll: 'history:download-all',\n" +
+    '  // 缓存：统计 + 按项清理\n' +
+    "  cacheStats: 'cache:stats',\n" +
+    "  cacheClearImages: 'cache:clear-images',\n" +
+    "  cacheClearRefs: 'cache:clear-refs',\n" +
+    "  cacheClearAll: 'cache:clear-all',\n" +
+    "  generateRun: 'generate:run',\n" +
+    "  generateCancel: 'generate:cancel',\n" +
+    "  historyList: 'history:list',\n" +
+    "  historyDelete: 'history:delete',\n" +
+    '} as const\n' +
+    '\n' +
+    'export interface Api {\n' +
+    '  getSettings(): Promise<AppSettings>\n' +
+    '  saveSettings(patch: Partial<AppSettings>): Promise<AppSettings>\n' +
+    '  addModel(name: string): Promise<AppSettings>\n' +
+    '  deleteModel(name: string): Promise<AppSettings>\n' +
+    "  addPreset(p: Omit<Preset, 'id'>): Promise<AppSettings>\n" +
+    '  updatePreset(p: Preset): Promise<AppSettings>\n' +
+    '  deletePreset(id: string): Promise<AppSettings>\n' +
+    '  setActivePreset(id: string): Promise<AppSettings>\n' +
+    '  addSkill(input: { name: string; content: string; sourceName?: string }): Promise<AppSettings>\n' +
+    '  deleteSkill(id: string): Promise<AppSettings>\n' +
+    '  clearHistory(): Promise<HistoryEntry[]>\n' +
+    '  downloadHistoryFile(filename: string): Promise<void>\n' +
+    '  downloadHistoryFiles(filenames: string[]): Promise<void>\n' +
+    '  getCacheStats(): Promise<CacheStats>\n' +
+    '  clearGeneratedImages(): Promise<CacheStats>\n' +
+    '  clearRefCache(): Promise<CacheStats>\n' +
+    '  clearAllCache(): Promise<{ entries: HistoryEntry[]; stats: CacheStats }>\n' +
+    '  generate(req: GenerateRequest): Promise<GenerateResult>\n' +
+    '  cancel(requestId: string): Promise<void>\n' +
+    '  listHistory(): Promise<HistoryEntry[]>\n' +
+    '  deleteHistory(id: string): Promise<HistoryEntry[]>\n' +
+    '}\n'
+}{
+  file: 'shared/types.ts',
+  len: 5184,
+  snippet: '// Single source of truth for all data shapes crossing the process boundary.\n' +
+    '\n' +
+    "export type AspectRatio = '21:9' | '16:9' | '3:2' | '4:3' | '1:1' | '3:4' | '2:3' | '9:16'\n" +
+    "export type Resolution = 'auto' | '1K' | '2K' | '4K' | '6K' | '8K' | `${number}x${number}`\n" +
+    "export type Quality    = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'\n" +
+    'export type Count = 1 | 2 | 3 | 4\n' +
+    "export type ImageFieldName = 'image' | 'images' | 'image_url'\n" +
+    "export type SizeMode = 'computed' | 'square' | 'omit'\n" +
+    '\n' +
+    'export interface Preset {\n' +
+    '  id: string\n' +
+    '  name: string                            // 显示名，例如 "主力中转 / ClaudeCode 站"\n' +
+    '  baseUrl: string\n' +
+    '  apiKey: string\n' +
+    '  pricePerImage: number                   // 元/张；用户手动填，可为 0\n' +
+    '  // 模型 + 字段名 + 尺寸模式也跟随预设走；同一用户可能用不同预设调不同模型\n' +
+    '  model: string\n' +
+    '  imageFieldName: ImageFieldName\n' +
+    '  sizeMode: SizeMode\n' +
+    '  sendAspectRatio: boolean\n' +
+    '}\n' +
+    '\n' +
+    'export interface AppSettings {\n' +
+    '  presets: Preset[]                       // 至少 1 条\n' +
+    '  activePresetId: string                  // 等于 presets 中某条 id\n' +
+    '  // 兼容旧版：保留 model 默认值；新 UI 已经搬到 preset 上\n' +
+    '  defaultModel: string\n' +
+    '  timeoutMs: number\n' +
+    '  models: string[]                        // 全局可用模型列表（ModelDisplay 下拉用）\n' +
+    '  skills: Skill[]                         // 用户上传的 skill（右上角 Skills 区展示）\n' +
+    '}\n' +
+    '\n' +
+    '// 用户上传的 skill：Markdown / Txt 纯文本。全文存盘持久化，\n' +
+    '// 输入框里只 render 一个红色名称胶囊，生成时后台把全文拼入提示词。\n' +
+    'export interface Skill {\n' +
+    '  id: string\n' +
+    '  name: string                            // 胶囊上显示的名字（token 标识，全局唯一）\n' +
+    '  content: string                         // 全文（生成时拼入）\n' +
+    '  sourceName: string                      // 上传时的原始文件名\n' +
+    '  charCount: number\n' +
+    '  createdAt: number\n' +
+    '}\n' +
+    '\n' +
+    "export const DEFAULT_MODELS: string[] = ['gpt-image-2', 'gpt-image-1', 'dall-e-3', 'dall-e-2', 'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst']\n" +
+    '\n' +
+    '// 六档画质：新 2.6 全支持，老四模型只认前四档（auto/low/medium/high）\n' +
+    "export const QUALITY_ALL: Quality[] = ['auto', 'low', 'medium', 'high', 'xhigh', 'max']\n" +
+    "export const QUALITY_LEGACY: Quality[] = ['auto', 'low', 'medium', 'high']\n" +
+    '\n' +
+    'export function isLegacyFourModel(model: string): boolean {\n' +
+    '  if (!model) return true\n' +
+    "  if (model.includes('2.6')) return false\n" +
+    "  const legacy = ['gpt-image-2', 'gpt-image-1', 'dall-e-3', 'dall-e-2']\n" +
+    '  if ((legacy as string[]).includes(model)) return true\n' +
+    '  // 自定义未知模型：放行全六档，避免 UI 炸\n' +
+    '  return false\n' +
+    '}\n' +
+    '\n' +
+    'export function getSupportedQualities(model: string): Quality[] {\n' +
+    '  return isLegacyFourModel(model) ? QUALITY_LEGACY : QUALITY_ALL\n' +
+    '}\n' +
+    '\n' +
+    'export function normalizeQuality(q: unknown, model?: string): Quality {\n' +
+    '  const allowed = model ? getSupportedQualities(model) : QUALITY_ALL\n' +
+    "  if (typeof q === 'string' && (allowed as string[]).includes(q)) return q as Quality\n" +
+    "  return 'medium'\n" +
+    '}\n' +
+    '\n' +
+    'export function normalizeResolution(r: unknown): Resolution {\n' +
+    "  if (r === 'auto' || r === '1K' || r === '2K' || r === '4K' || r === '6K' || r === '8K') return r as Resolution\n" +
+    "  if (typeof r === 'string' && /^\\d+x\\d+$/.test(r)) return r as Resolution\n" +
+    "  return 'auto'\n" +
+    '}\n' +
+    '\n' +
+    'export const DEFAULT_SETTINGS: AppSettings = {\n' +
+    '  presets: [\n' +
+    '    {\n' +
+    "      id: 'default',\n" +
+    "      name: '默认预设',\n" +
+    "      baseUrl: '',\n" +
+    "      apiKey: '',\n" +
+    '      pricePerImage: 0,\n' +
+    "      model: 'gpt-image-2',\n" +
+    "      imageFieldName: 'image',\n" +
+    "      sizeMode: 'computed',\n" +
+    '      sendAspectRatio: true,\n' +
+    '    },\n' +
+    '  ],\n' +
+    "  activePresetId: 'default',\n" +
+    "  defaultModel: 'gpt-image-2',\n" +
+    '  timeoutMs: 600_000,\n' +
+    '  models: [...DEFAULT_MODELS],\n' +
+    '  skills: [],\n' +
+    '}\n' +
+    '\n' +
+    'export interface RefImage {\n' +
+    '  id: string\n' +
+    '  index: number\n' +
+    '  name: string\n' +
+    "  mime: 'image/jpeg' | 'image/png' | 'image/webp'\n" +
+    '  dataUrl: string\n' +
+    '  width: number\n' +
+    '  height: number\n' +
+    '  bytes: number\n' +
+    '}\n' +
+    '\n' +
+    '// 历史里持久化的参考图快照（dataUrl 可能很大，但为了回填必须保留）。\n' +
+    '// 回填时直接恢复为 RefImage，无需用户重新上传。\n' +
+    'export type ArchivedRefImage = RefImage\n' +
+    '\n' +
+    'export interface GenerateParams {\n' +
+    '  aspect: AspectRatio\n' +
+    '  resolution: Resolution\n' +
+    '  quality: Quality\n' +
+    '  count: Count\n' +
+    '}\n' +
+    '\n' +
+    'export interface GenerateRequest {\n' +
+    '  requestId: string\n' +
+    '  promptRaw: string\n' +
+    '  promptResolved: string\n' +
+    '  params: GenerateParams\n' +
+    '  images: string[]\n' +
+    '  // 参考图快照（renderer 传来的 RefImage 元数据 + dataUrl），main 落盘历史时直接存。\n' +
+    '  refImages?: ArchivedRefImage[]\n' +
+    '}\n' +
+    '\n' +
+    'export interface CacheStats {\n' +
+    '  imageCount: number            // images/ 下的生成图文件数\n' +
+    '  imageBytes: number            // 生成图总字节\n' +
+    '  historyCount: number          // 历史条目数\n' +
+    '  historyBytes: number          // history.json 文件体积\n' +
+    '  refCount: number              // 历史内嵌参考图快照总数\n' +
+    '  refBytes: number              // 参考图快照 dataUrl 估算体积\n' +
+    '  totalBytes: number            // imageBytes + historyBytes（含内嵌快照）\n' +
+    '  userDataDir: string\n' +
+    '  imagesDir: string\n' +
+    '}\n' +
+    '\n' +
+    'export interface GeneratedImage {\n' +
+    '  file: string\n' +
+    '  url: string\n' +
+    '  width?: number\n' +
+    '  height?: number\n' +
+    '}\n' +
+    '\n' +
+    'export interface HistoryEntry {\n' +
+    '  id: string\n' +
+    '  createdAt: number\n' +
+    '  presetName: string                      // 用哪个预设出的（历史展示用）\n' +
+    '  model: string\n' +
+    '  promptRaw: string\n' +
+    '  promptResolved: string\n' +
+    '  params: GenerateParams\n' +
+    '  size: string\n' +
+    '  refImageFiles: string[]\n' +
+    '  refImages?: ArchivedRefImage[]          // 参考图快照（新版写入；老条目缺失则回填为空）\n' +
+    '  images: GeneratedImage[]\n' +
+    '}\n' +
+    '\n' +
+    'export type GenerateErrorCode =\n' +
+    "  | 'config'\n" +
+    "  | 'payload'\n" +
+    "  | 'network'\n" +
+    "  | 'timeout'\n" +
+    "  | 'canceled'\n" +
+    "  | 'busy'\n" +
+    "  | 'http'\n" +
+    "  | 'parse'\n" +
+    "  | 'io'\n" +
+    '\n' +
+    'export type GenerateResult =\n' +
+    '  | { ok: true; entry: HistoryEntry }\n' +
+    '  | {\n' +
+    '      ok: false\n' +
+    '      code: GenerateErrorCode\n' +
+    '      status?: number\n' +
+    '      message: string\n' +
+    '      body?: string\n' +
+    '    }\n'
+}

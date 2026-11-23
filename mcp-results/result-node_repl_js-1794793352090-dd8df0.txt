@@ -1,0 +1,1367 @@
+Warning: root was declared with const; use let for reassignable variables.
+===== components/PromptEditor.tsx (18993 chars) =====
+import { useEffect, useRef, useState } from 'react'
+import { useComposer } from '../state/useComposer'
+import { GenerateButton } from './GenerateButton'
+
+// ----------------------- HTML <-> 纯文本 -----------------------
+// 我们让 contenteditable 的内容是 HTML（用于给 @图N 着色），
+// 而 state.prompt 始终是纯文本（用于 resolvePrompt / 写入历史 / 发到中转站）。
+
+const PLACEHOLDER = '描述你想生成的画面… 输入 @ 引用已上传的参考图，点击上方模板快速填充'
+
+/** 把纯文本里的 `@图N` (N 是数字) 替换成高亮 HTML，
+ *  把 `⟦skill:NAME⟧` 替换成红色 Skill 胶囊。其它字符 escaped。
+ *  注意顺序：先 escape → skill token（含 ⟦⟧，escape 不动它们）→ @图N。 */
+export function mentionizeMarkup(plain: string): string {
+  if (!plain) return ''
+  const escaped = plain
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  // Skill 胶囊：只显示名字（全文生成时后台拼入）。
+  // 名字已在入库时去掉 HTML 特殊字符（见 normalizeSkillName），直接匹配即可。
+  const withSkills = escaped.replace(
+    /⟦skill:([^\]⟧\r\n]+)⟧/g,
+    (_m, n) => {
+      const name = String(n).replace(/["']/g, '')
+      return `<span class="skill-chip" data-skill="${name}">◆ ${name}</span>`
+    },
+  )
+  return withSkills.replace(
+    /@(?:参考图|图)(\d+)/g,
+    (_m, n) => `<span class="mention" data-mention="${n}">@图${n}</span>`,
+  )
+}
+
+/** 从 contenteditable 的 innerHTML 提取纯文本。
+ *
+ *  IMPORTANT: this is the canonical text model — the concatenation of text
+ *  nodes ONLY. Chromium's Range.toString() (used for live caret offsets) does
+ *  NOT include `<br>` elements NOR div boundaries, and the SHOW_TEXT
+ *  TreeWalker (used to map offsets back onto DOM positions) agrees with it.
+ *  The previous version translated `<br>` into `\n` — desyncing the three
+ *  views by one char per `<br>` and causing off-by-N errors: after the first
+ *  mention (which inserts a `<br>`), every later `@图X` was anchored at the
+ *  wrong offset and the chip ended up appended at the END of the whole prompt
+ *  on a new line, no matter where the user typed `@`. */
+export function htmlToText(html: string): string {
+  if (!html) return ''
+  let s = html.replace(/<br\s*\/?>/gi, '')
+  // Skill 胶囊是整段 token 的可视化：span 被删一半/属性丢失时，
+  // 里面的 `◆ 名字` 裸文本不能残留，统一还原成 token 再做完整性收尾。
+  s = s.replace(/<span[^>]*data-skill="([^"]*)"[^>]*>.*?<\/span>/gi, (_m, n) => `⟦skill:${n}⟧`)
+  s = s.replace(/<span[^>]*class="[^"]*skill-chip[^"]*"[^>]*>.*?<\/span>/gi, '')
+  s = s.replace(/<[^>]+>/g, '')
+  s = s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  // 残缺 token 收尾：胶囊只删了一半时会剩下 `⟦skill:名字` / `名字⟧` 碎片，
+  // 统一清除，保证文本模型里要么是完整 token、要么什么都没有。
+  s = s.replace(/⟦skill:[^\]⟧\r\n]*$/g, '')
+  s = s.replace(/^[^\[⟦\r\n]*⟧/g, '')
+  s = s.replace(/⟦skill:[^\]⟧\r\n]*[\r\n]/g, '')
+  return s
+}
+
+/** Map an absolute character index (canonical text model: text nodes only) to
+ *  the DOM text node + offset containing it. Falls back to the last text
+ *  node's end for indices at/after the total length. */
+function findTextPos(el: HTMLElement, abs: number): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let acc = 0
+  let node: Node | null
+  while ((node = walker.nextNode())) {
+    const tn = node as Text
+    const len = tn.data.length
+    if (acc + len >= abs) return { node: tn, offset: abs - acc }
+    acc += len
+  }
+  // abs may equal total length — fall back to last text node, end offset.
+  const all: Text[] = []
+  const w2 = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let n: Node | null
+  while ((n = w2.nextNode())) all.push(n as Text)
+  const last = all[all.length - 1]
+  if (last) return { node: last, offset: last.data.length }
+  return null
+}
+
+/** The text node that follows `node` in document order, or null. */
+function nextTextNodeAfter(el: HTMLElement, node: Node): Text | null {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let n: Node | null
+  let seen = false
+  while ((n = walker.nextNode())) {
+    if (seen) return n as Text
+    if (n === node) seen = true
+  }
+  return null
+}
+
+/** Live caret offset in the canonical text model, or -1 when unavailable. */
+function caretTextOffset(el: HTMLElement): number {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return -1
+  try {
+    const range = sel.getRangeAt(0)
+    if (!el.contains(range.startContainer)) return -1
+    const pre = document.createRange()
+    pre.selectNodeContents(el)
+    pre.setEnd(range.startContainer, range.startOffset)
+    return pre.toString().length
+  } catch {
+    return -1
+  }
+}
+
+/** True when the '@' at character index `idx` belongs to an EXISTING mention
+ *  chip (an old @图N), not to a fresh query the user is typing. */
+function isMentionChipAt(el: HTMLElement, text: string, idx: number): boolean {
+  if (text[idx] !== '@') return false
+  let node = findTextPos(el, idx)
+  if (!node) return false
+  // idx may sit on a node boundary (end of a text node); the '@' then starts
+  // the NEXT text node (e.g. a chip that begins a new line).
+  if (node.offset >= node.node.data.length) {
+    const next = nextTextNodeAfter(el, node.node)
+    if (!next) return false
+    node = { node: next, offset: 0 }
+  }
+  if (node.node.data[node.offset] !== '@') return false
+  const parent = node.node.parentElement
+  return !!parent && !!parent.closest('.mention')
+}
+
+/** Find the active "@query" segment the caret sits inside.
+ *
+ *  The query is anchored AT THE CARET: scan backward from the caret across
+ *  non-whitespace, non-'@' characters until we hit a fresh '@' (that's the
+ *  anchor). The scan stops — no menu — at whitespace, at an old mention chip,
+ *  or at the start of the text. Anchoring at the caret (instead of at the
+ *  LAST '@' in the text) is what keeps the popup correct when older @图N
+ *  chips exist later in the prompt: previously the query was anchored at the
+ *  last chip, the wrong range got deleted, and the new chip was appended at
+ *  the end of the whole prompt on a new line.
+ *
+ *  `fallbackCaret` is used only when the live selection is unavailable (React
+ *  re-render / IME); handleInput keeps it fresh from the last known caret. */
+function findActiveQuery(el: HTMLElement, text: string, fallbackCaret: number): { atStart: number; atEnd: number; query: string } {
+  const live = caretTextOffset(el)
+  const caretPos = live >= 0 ? Math.min(live, text.length) : Math.min(fallbackCaret, text.length)
+  if (caretPos <= 0) return { atStart: -1, atEnd: -1, query: '' }
+
+  for (let i = caretPos; i > 0; i--) {
+    const ch = text[i - 1]
+    if (ch === '@') {
+      if (isMentionChipAt(el, text, i - 1)) return { atStart: -1, atEnd: -1, query: '' }
+      return { atStart: i - 1, atEnd: caretPos, query: text.slice(i, caretPos) }
+    }
+    if (/\s/.test(ch ?? '')) return { atStart: -1, atEnd: -1, query: '' }
+  }
+  return { atStart: -1, atEnd: -1, query: '' }
+}
+
+function plainToInnerHTML(plain: string): string {
+  const lines = plain.split('\n')
+  return lines.map((line, i) => {
+    const html = i === lines.length - 1 && line === ''
+      ? '<br>'
+      : (line === '' ? '<br>' : mentionizeMarkup(line))
+    return `<div>${html}</div>`
+  }).join('') || '<div><br></div>'
+}
+
+// ----------------------- 组件 -----------------------
+
+export function PromptEditor() {
+  const { state, setPrompt } = useComposer()
+  const prompt = state.prompt
+  const refImages = state.refImages
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const lastWrittenRef = useRef(prompt)
+  // Last known caret offset in the canonical text model. Used by findActiveQuery
+  // only when the live selection is unavailable (React re-render / IME).
+  const lastCaretRef = useRef(0)
+  const isComposingRef = useRef(false)
+  const [mentionMenu, setMentionMenu] = useState<{
+    open: boolean
+    atStart: number
+    atEnd: number
+    top: number; left: number
+    query: string
+  }>({ open: false, atStart: -1, atEnd: -1, top: 0, left: 0, query: '' })
+
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    if (lastWrittenRef.current === prompt) return
+    el.innerHTML = plainToInnerHTML(prompt)
+    lastWrittenRef.current = prompt
+    placeCaretAtEnd(el)
+  }, [prompt])
+
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!mentionMenu.open) return
+    const closeIfOutside = (e: MouseEvent) => {
+      const t = e.target as Node | null
+      if (menuRef.current && t && menuRef.current.contains(t)) return
+      if (rootRef.current && t && rootRef.current.contains(t)) return
+      setMentionMenu((m) => ({ ...m, open: false }))
+    }
+    window.addEventListener('mousedown', closeIfOutside, true)
+    return () => window.removeEventListener('mousedown', closeIfOutside, true)
+  }, [mentionMenu.open])
+
+  const isEmpty = prompt.length === 0
+
+  // -------------------- 输入处理 --------------------
+  // Find the active "@query" segment the caret sits inside — see the module
+  // level findActiveQuery(): it anchors at the CARET (walking backward), not
+  // at the last '@' in the text, so older @图N chips elsewhere never hijack
+  // the popup anchor.
+
+  const handleInput = () => {
+    const el = rootRef.current
+    if (!el) return
+    // composition guard：IME拼写中不解析@，不上菜单，不改state
+    if (isComposingRef.current) return
+    const text = htmlToText(el.innerHTML)
+    lastWrittenRef.current = text
+    setPrompt(text)
+
+    if (refImages.length === 0) {
+      setMentionMenu((m2) => ({ ...m2, open: false }))
+      return
+    }
+
+    const live = caretTextOffset(el)
+    if (live >= 0) lastCaretRef.current = live
+
+    const { atStart, atEnd, query } = findActiveQuery(el, text, lastCaretRef.current)
+    if (atStart < 0) {
+      setMentionMenu((m2) => ({ ...m2, open: false }))
+      return
+    }
+
+    // Position the popup near the caret if we can; otherwise near the editor.
+    let topPx = 0; let leftPx = 0
+    try {
+      const sel = window.getSelection()
+      if (sel && sel.rangeCount > 0) {
+        const r = sel.getRangeAt(0).getBoundingClientRect()
+        if (r.width > 0 || r.height > 0) {
+          topPx = r.bottom + window.scrollY + 4
+          leftPx = r.left + window.scrollX + 12
+        }
+      }
+    } catch { /* ignore */ }
+    if (topPx === 0 && leftPx === 0) {
+      const rect = el.getBoundingClientRect()
+      topPx = rect.bottom + window.scrollY + 4
+      leftPx = rect.left + window.scrollX + 12
+    }
+
+    setMentionMenu({
+      open: true,
+      atStart,
+      atEnd,
+      top: topPx,
+      left: leftPx,
+      query,
+    })
+  }
+
+  // -------------------- 插入 mention --------------------
+  // Use the character offsets stored when the popup opened (atStart/atEnd in
+  // text). Locate them in the DOM via TreeWalker so we never depend on the
+  // live selection — that selection is gone by the time the user clicks a
+  // popup button (the click moved focus to the button).
+  const insertMention = (indexOneBased: number) => {
+    const el = rootRef.current
+    if (!el) return
+    const { atStart, atEnd, query } = mentionMenu
+    if (atStart < 0 || atEnd < atStart) return
+
+    // Verify the range still represents an @query in the current text — the
+    // user might have edited between popup open and click. If so, fall back
+    // to recomputing from current text using the live caret.
+    let realStart = atStart
+    let realEnd = atEnd
+    const text = htmlToText(el.innerHTML)
+    if (text[atStart] !== '@' || text.slice(atStart + 1, atEnd) !== query) {
+      const r = findActiveQuery(el, text, lastCaretRef.current)
+      if (r.atStart < 0) return
+      realStart = r.atStart
+      realEnd = r.atEnd
+    }
+
+    const start = findTextPos(el, realStart)
+    const end = findTextPos(el, realEnd)
+    if (!start || !end) return
+
+    el.focus()
+
+    // `container`/`containerEl` are the caret's text node + its parent
+    // block. `originalEndLen` captures the text length BEFORE we delete
+    // the @query below, so we can still tell afterwards whether the caret
+    // sat at the end of the line.
+    const container = end.node
+    const containerEl = container.parentElement
+    const originalEndLen = container.data.length
+
+    const deleteRange = doc
+
+===== state/useComposer.tsx (13109 chars) =====
+import {
+  createContext, useContext, useEffect, useMemo, useReducer, useRef,
+} from 'react'
+import type { ReactNode } from 'react'
+import type {
+  AspectRatio, Count, GeneratedImage, GenerateParams, GenerateRequest,
+  HistoryEntry, Preset, Quality, RefImage, Resolution,
+} from '@shared/types'
+import { DEFAULT_SETTINGS, getSupportedQualities, normalizeQuality, normalizeResolution, type AppSettings } from '@shared/types'
+import { TEMPLATES, type TemplateId } from '../data/templates'
+
+type Status = 'idle' | 'loading' | 'error'
+
+interface ComposerState {
+  prompt: string
+  params: GenerateParams
+  refImages: RefImage[]
+  status: Status
+  activeRequestId?: string
+  error?: { code: string; message: string; body?: string }
+  results: GeneratedImage[]
+  history: HistoryEntry[]
+  settings: AppSettings
+  // 当前预览条目（生成的新结果，或历史回填）。previewEntry.images 决定 PreviewBox 渲染哪些图
+  previewEntry?: HistoryEntry
+}
+
+type Action =
+  | { type: 'set-prompt'; value: string }
+  | { type: 'set-param'; key: keyof GenerateParams; value: GenerateParams[keyof GenerateParams] }
+  | { type: 'apply-template'; id: TemplateId }
+  | { type: 'set-refs'; refs: RefImage[] }
+  | { type: 'set-status'; status: Status; error?: ComposerState['error']; requestId?: string }
+  | { type: 'set-results'; results: GeneratedImage[]; entry?: HistoryEntry }
+  | { type: 'set-history'; history: HistoryEntry[] }
+  | { type: 'set-settings'; settings: AppSettings }
+  | { type: 'set-preview'; entry: HistoryEntry | undefined }
+
+const INITIAL_PARAMS: GenerateParams = { aspect: '1:1', resolution: 'auto', quality: 'auto', count: 1 }
+
+const initialState: ComposerState = {
+  prompt: '',
+  params: INITIAL_PARAMS,
+  refImages: [],
+  status: 'idle',
+  error: undefined,
+  results: [],
+  history: [],
+  settings: DEFAULT_SETTINGS,
+}
+
+function reducer(state: ComposerState, action: Action): ComposerState {
+  switch (action.type) {
+    case 'set-prompt': return { ...state, prompt: action.value }
+    case 'set-param': return { ...state, params: { ...state.params, [action.key]: action.value } }
+    case 'apply-template': {
+      const t = TEMPLATES.find((x) => x.id === action.id)
+      return t ? { ...state, prompt: t.text } : state
+    }
+    case 'set-refs': return { ...state, refImages: action.refs }
+    case 'set-status':
+      return {
+        ...state,
+        status: action.status,
+        error: action.error,
+        activeRequestId: action.status === 'loading' ? action.requestId : undefined,
+      }
+    case 'set-results':
+      return { ...state, results: action.results, previewEntry: action.entry, activeRequestId: undefined }
+    case 'set-history': return { ...state, history: action.history }
+    case 'set-settings': return { ...state, settings: action.settings }
+    case 'set-preview': return { ...state, previewEntry: action.entry, results: action.entry?.images ?? [] }
+    default: return state
+  }
+}
+
+interface ComposerApi {
+  state: ComposerState
+  setPrompt(v: string): void
+  setParam(key: keyof GenerateParams, value: AspectRatio | Resolution | Quality | Count): void
+  applyTemplate(id: TemplateId): void
+  insertSkill(name: string): void
+  setRefs(refs: RefImage[]): void
+  runGenerate(promptResolved: string): Promise<void>
+  cancelGenerate(): Promise<void>
+  refreshHistory(): Promise<void>
+  reloadSettings(): Promise<void>
+  setActivePreset(id: string): Promise<void>
+  setPresetModel(id: string, model: string): Promise<void>
+  addModel(name: string): Promise<void>
+  deleteModel(name: string): Promise<void>
+  addSkill(input: { name: string; content: string; sourceName?: string }): Promise<void>
+  deleteSkill(id: string): Promise<void>
+  saveSettings(patch: Partial<AppSettings>): Promise<void>
+  deleteHistoryEntry(id: string): Promise<void>
+  refillFromHistory(h: HistoryEntry): void
+}
+
+const ComposerContext = createContext<ComposerApi | null>(null)
+
+export function ComposerProvider({ children }: { children: ReactNode }) {
+  const [state, dispatch] = useReducer(reducer, initialState)
+  // 最新 state 的 ref：runGenerate 是异步的，await 之后闭包里的 state 会过期，
+  // 用 ref 拿“发起时的 prompt/params/refImages”快照，避免竞态。
+  const stateRef = useRef(state)
+  stateRef.current = state
+
+  useEffect(() => {
+    if (!window.api) return
+    void window.api.getSettings().then((s) => dispatch({ type: 'set-settings', settings: s }))
+    void window.api.listHistory().then((h) => dispatch({ type: 'set-history', history: h }))
+  }, [])
+
+  const api: ComposerApi = useMemo(() => ({
+    state,
+    setPrompt(v) { dispatch({ type: 'set-prompt', value: v }) },
+    setParam(key, value) { dispatch({ type: 'set-param', key: key as keyof GenerateParams, value: value as never }) },
+    applyTemplate(id) { dispatch({ type: 'apply-template', id }) },
+    // 点击右上角 skill → 在 prompt 末尾追加一个 skill token（`⟦skill:NAME⟧ `）。
+    // 重复点击同一 skill 不重复追加；PromptEditor 会把它 render 成红色胶囊。
+    // 用空格分隔（不用换行）：编辑器的文本模型里 <br> 不占字符，
+    // 换行分隔的 token 在回解析时容易粘连——空格能完整 surviving。
+    insertSkill(name) {
+      const token = `⟦skill:${name}⟧`
+      const cur = stateRef.current.prompt
+      if (cur.includes(token)) return
+      const sep = cur.length === 0 || /[\s]$/.test(cur) ? '' : ' '
+      dispatch({ type: 'set-prompt', value: `${cur}${sep}${token} ` })
+    },
+    setRefs(refs) { dispatch({ type: 'set-refs', refs }) },
+    async runGenerate(promptResolved: string) {
+      // P0 并发互斥（前端同步锁）：dispatch 是同步的，所以这个判断+占位是原子的——
+      // 连点、快捷键重入、React 18 StrictMode 双调用都只会放行第一个。
+      // main 侧还有第二道 busy 锁（防多窗口/未来多入口），此处是主防线。
+      if (stateRef.current.status === 'loading' || stateRef.current.activeRequestId) return
+      const snap = stateRef.current
+      const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      const req: GenerateRequest = {
+        requestId,
+        promptRaw: snap.prompt,
+        promptResolved,
+        params: snap.params,
+        images: snap.refImages.map((r) => r.dataUrl),
+        // 参考图快照随请求发给 main，落盘进历史，回填时可直接恢复
+        refImages: snap.refImages.map((r, i) => ({ ...r, index: i + 1 })),
+      }
+      console.log('[input] promptRaw len=', snap.prompt.length, snap.prompt.slice(0, 200))
+      console.log('[parsedPrompt]', promptResolved.slice(0, 300))
+      console.log('[ipcPayload] requestId=', requestId, 'images=', req.images.length, 'refImages=', req.refImages?.length ?? 0)
+      console.log('[localFile] refs=', snap.refImages.map((r) => ({ name: r.name, bytes: r.bytes, hasData: !!r.dataUrl })).slice(0, 4));
+      console.log('[job] job_id=', requestId, 'enqueue images=', req.images.length);
+      console.assert(snap.refImages.every((r) => !!r.dataUrl), '[localFile] assert dataUrl');
+      if (snap.refImages.length > 0 && snap.refImages.some((r) => !r.dataUrl)) {
+        console.log('[ipcPayload] missing dataUrl/path, intercept');
+        dispatch({ type: 'set-status', status: 'error', error: { code: 'payload', message: '参考图缺失，已拦截（红点）' } })
+        return
+      }
+      if (req.images.some((s) => s.includes('/Users/'))) console.warn('[ipcPayload] contains /Users absolute path, should be file:// or img://')
+      dispatch({ type: 'set-status', status: 'loading', requestId })
+      let r: Awaited<ReturnType<typeof window.api.generate>>
+      try {
+        r = await window.api.generate(req)
+      } catch (e) {
+        dispatch({
+          type: 'set-status',
+          status: 'error',
+          error: { code: 'network', message: e instanceof Error ? e.message : '生成请求失败' },
+        })
+        return
+      }
+      if (r.ok) {
+        // 过期回包保护：等待期间用户可能点了取消（或又发起了新请求），
+        // 此时 activeRequestId 已变化，这个回包直接丢弃，不覆盖当前 UI。
+        if (stateRef.current.activeRequestId !== requestId) return
+        dispatch({ type: 'set-results', results: r.entry.images, entry: r.entry })
+        const h = await window.api.listHistory()
+        dispatch({ type: 'set-history', history: h })
+        dispatch({ type: 'set-status', status: 'idle' })
+      } else if (r.code === 'busy') {
+        // main 侧第二道锁（多窗口等极端路径），前端锁没拦住时才到这里。
+        // 注意：此前已 dispatch loading 占位，必须在此收尾，否则界面转圈卡死、
+        // 且 activeRequestId 一直占着导致后续所有生成都被前端锁拦掉。
+        if (stateRef.current.activeRequestId !== requestId) return
+        dispatch({ type: 'set-status', status: 'error', error: { code: r.code, message: r.message, body: r.body } })
+        return
+      } else {
+        if (stateRef.current.activeRequestId !== requestId) return
+        dispatch({ type: 'set-status', status: 'error', error: { code: r.code, message: r.message, body: r.body } })
+      }
+    },
+    async cancelGenerate() {
+      const requestId = stateRef.current.activeRequestId
+      if (!requestId) return
+      // 先让 main 侧 abort，再把 UI 切到 canceled 状态。
+      // generate() 的 promise 随后也会 resolve（canceled），但此时已不是 loading，
+      // 用 activeRequestId 对账：只处理“仍是同一请求”的回包，过期回包直接丢弃。
+      try {
+        await window.api.cancel(requestId)
+      } catch { /* ignore */ }
+      if (stateRef.current.activeRequestId === requestId) {
+        dispatch({ type: 'set-status', status: 'error', error: { code: 'canceled', message: '已取消生成' } })
+      }
+    },
+    refillFromHistory(h) {
+      dispatch({ type: 'set-prompt', value: h.promptRaw })
+      dispatch({ type: 'set-param', key: 'aspect', value: h.params.aspect })
+      dispatch({ type: 'set-param', key: 'resolution', value: normalizeResolution(h.params.resolution) })
+      // Old history rows (pre-quality field) lack `quality`; fall back to medium.
+      dispatch({ type: 'set-param', key: 'quality', value: normalizeQuality(h.params.quality) })
+      dispatch({ type: 'set-param', key: 'count', value: h.params.count })
+      // 回填参考图快照：老条目没有 refImages 字段时恢复为空，不崩。
+      const refs: RefImage[] = Array.isArray(h.refImages)
+        ? h.refImages.map((r, i) => ({ ...r, index: i + 1 }))
+        : []
+      dispatch({ type: 'set-refs', refs })
+      dispatch({ type: 'set-preview', entry: h })
+      dispatch({ type: 'set-status', status: 'idle', error: undefined })
+    },
+    async refreshHistory() {
+      const h = await window.api.listHistory()
+      dispatch({ type: 'set-history', history: h })
+    },
+    async deleteHistoryEntry(id) {
+      const h = await window.api.deleteHistory(id)
+      dispatch({ type: 'set-history', history: h })
+      // 若删掉的正是当前预览条目，清空预览，避免 PreviewBox 挂着已删除的图片
+      if (stateRef.current.previewEntry?.id === id) {
+        dispatch({ type: 'set-preview', entry: undefined })
+      }
+    },
+    async reloadSettings() {
+      const s = await window.api.getSettings()
+      dispatch({ type: 'set-settings', settings: s })
+    },
+    async setActivePreset(id) {
+      const s = await window.api.setActivePreset(id)
+      dispatch({ type: 'set-settings', settings: s })
+    },
+    async addSkill(input) {
+      const s = await window.api.addSkill(input)
+      dispatch({ type: 'set-settings', settings: s })
+    },
+    async deleteSkill(id) {
+      const s = await window.api.deleteSkill(id)
+      dispatch({ type: 'set-settings', settings: s })
+    },
+    async setPresetModel(id, model) {
+      const target = stateRef.current.settings.presets.find((p) => p.id === id)
+      if (!target) return
+      const trimmed = model.trim()
+      if (!trimmed || trimmed === target.model) return
+      const s = await window.api.updatePreset({ ...target, model: trimmed })
+      dispatch({ type: 'set-settings', settings: s })
+      // 切到老四模型时 xhigh/max 自动钳位到 medium，避免发包被拒、UI 残留高档选中
+      const allowed = getSupportedQualities(trimmed)
+      const curQ = stateRef.current.params.quality
+      if (!(allowed as string[]).includes(curQ) ) dispatch({ type: 'set-param', key: 'quality', value: 'medium' })
+    },
+    async addModel(name) {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      const s = await window.api.addModel(name)
+      dispatch({ type: 'set-settings', settings: s })
+    },
+    async deleteModel(name) {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      // 乐观更新：先本地移除 chip 给即时反馈，失败再 reload 回滚。
+      // 解决“点了 × 界面没变化”的体感问题（尤其 IPC 慢/弹窗被拦时）。
+      const prev = stateRef.current.settings
+      const mo
+
+===== lib/refTokens.ts (2203 chars) =====
+import type { RefImage } from '@shared/types'
+
+const TOKEN_RE = /@(?:参考图|图)\s*(\d+)?/g
+
+export interface ResolveResult {
+  text: string
+  referenced: number[]
+  errors: string[]
+  warnings: string[]
+}
+
+/**
+ * Resolve @图N tokens in the user prompt.
+ *
+ * - Always send every uploaded image, in index order (positional alignment invariant).
+ * - 1 image: strip tokens (no disambiguation needed; the model gets one image).
+ * - 2+ images: replace `@图N` with `第N张参考图` so multi-image referents stay
+ *   disambiguated in natural prose — and the literal sigil doesn't get baked
+ *   into the generated image.
+ */
+export function resolvePrompt(raw: string, refs: RefImage[]): ResolveResult {
+  const errors: string[] = []
+  const warnings: string[] = []
+  const referenced = new Set<number>()
+
+  if (refs.length === 0) {
+    // No images uploaded; just strip any stray tokens and report errors.
+    const cleaned = raw.replace(TOKEN_RE, '').replace(/\s{2,}/g, ' ').trim()
+    if (/@(参考图|图)/.test(raw)) {
+      errors.push('提示词包含 @图N 但未上传参考图')
+    }
+    return { text: cleaned, referenced: [], errors, warnings }
+  }
+
+  if (refs.length === 1) {
+    // Strip tokens; collapse whitespace.
+    let cleaned = raw.replace(TOKEN_RE, (m, n) => {
+      const idx = n ? parseInt(n, 10) : 1
+      if (idx !== 1) {
+        errors.push(`提示词引用了 @图${idx}，但只上传了 1 张参考图`)
+      } else {
+        referenced.add(1)
+      }
+      return ''
+    })
+    cleaned = cleaned.replace(/[ \t]{2,}/g, ' ').replace(/([一-龥]) ([一-龥])/g, '$1$2').trim()
+    return { text: cleaned, referenced: Array.from(referenced), errors, warnings }
+  }
+
+  // 2+ images: substitute with `第N张参考图`.
+  let text = raw.replace(TOKEN_RE, (_m, n) => {
+    const idx = n ? parseInt(n, 10) : 1
+    if (idx < 1 || idx > refs.length) {
+      errors.push(`提示词引用了 @图${idx}，但只上传了 ${refs.length} 张参考图`)
+      return ''
+    }
+    referenced.add(idx)
+    return `第${idx}张参考图`
+  })
+
+  // Tidy stray spaces.
+  text = text.replace(/[ \t]{2,}/g, ' ').trim()
+
+  // Warn about un-referenced images.
+  for (let i = 1; i <= refs.length; i++) {
+    if (!referenced.has(i)) warnings.push(`图${i} 未在提示词中引用`)
+  }
+
+  return { text, referenced: Array.from(referenced), errors, warnings }
+}
+
+
+===== lib/skillTokens.ts (2245 chars) =====
+import type { Skill } from '@shared/types'
+
+// Skill 胶囊的 VF 标识：渲染层红色胶囊 ↔ 纯文本 token 的双向映射。
+// 文本模型里 skill 以 `⟦skill:NAME⟧` 存在；显示时整段替换成红色胶囊。
+export const SKILL_CLS = 'skill-chip'
+
+// 生成时展开：把 token 按 skill 名替换成全文。
+// - 未知名字（skill 已被删）：整段删掉 + 报 errors（Generate 按钮据此禁用）。
+// - 重复引用同一 skill：只拼一次全文，后续重复处删掉（避免 prompt 膨胀）。
+export interface SkillResolveResult {
+  text: string
+  referenced: string[]
+  errors: string[]
+}
+
+export function resolveSkillPrompt(raw: string, skills: Skill[]): SkillResolveResult {
+  const errors: string[] = []
+  const referenced: string[] = []
+  const seen = new Set<string>()
+  const byName = new Map(skills.map((s) => [s.name, s]))
+  // SKILL_TOKEN_RE 是全局正则（/g），用 .test 会受 lastIndex 污染，这里手写匹配。
+  const TOKEN_RE = /⟦skill:([^\]⟧\r\n]+)⟧/g
+  const text = raw.replace(TOKEN_RE, (m, name: string) => {
+    const skill = byName.get(name)
+    if (!skill) {
+      errors.push(`引用的 Skill「${name}」已不存在，请删除红色胶囊后重试`)
+      return ''
+    }
+    if (seen.has(name)) return ''
+    seen.add(name)
+    referenced.push(name)
+    return `\n\n【Skill：${skill.name}】\n${skill.content}\n`
+  })
+  return { text: text.replace(/[ \t]{2,}/g, ' ').trim(), referenced, errors }
+}
+
+// 校验：编辑器里的哪些 skill token 已经失效（右上角删掉后输入框还留着胶囊）。
+export function missingSkillNames(raw: string, skills: Skill[]): string[] {
+  const names = new Set(skills.map((s) => s.name))
+  const missing = new Set<string>()
+  const TOKEN_RE = /⟦skill:([^\]⟧\r\n]+)⟧/g
+  let m: RegExpExecArray | null
+  while ((m = TOKEN_RE.exec(raw)) !== null) {
+    const name = m[1]
+    if (name && !names.has(name)) missing.add(name)
+  }
+  return Array.from(missing)
+}
+
+// 文本里实际引用的 skill 名（去重保序），历史 params 行 `· N skill` 计数用。
+export function skillNamesIn(raw: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const TOKEN_RE = /⟦skill:([^\]⟧\r\n]+)⟧/g
+  let m: RegExpExecArray | null
+  while ((m = TOKEN_RE.exec(raw)) !== null) {
+    const name = m[1]
+    if (name && !seen.has(name)) {
+      seen.add(name)
+      out.push(name)
+    }
+  }
+  return out
+}
+
+// 只读展示用：把 token 还原成 `◆ NAME` 纯文本。
+// Archive 列表、删除确认框走这个——直接展示 `⟦skill:…⟧` 会吓到用户。
+export function displayPrompt(raw: string): string {
+  return raw.replace(/⟦skill:([^\]⟧\r\n]+)⟧/g, (_m, n) => `◆ ${n}`).trim()
+}
+
+
+===== components/SkillPicker.tsx (3754 chars) =====
+import { useRef, useState } from 'react'
+import { useComposer } from '../state/useComposer'
+import { skillNameFromFile, SKILL_CONTENT_MAX } from '@shared/skills'
+
+// 右上角 Skills 区：复用原 presets（TemplatePills/.toc）的排版语言 ——
+// 同样的 eyebrow 计数、同样的 toc-item 行（编号 + 中文大字 + 英文小字 + hover →）。
+// 点击一行 → 往输入框插入红色胶囊；hover 行尾 × → 删除。
+// 上传：只收 .md / .markdown / .txt，纯文本读取，全文存盘。
+export function SkillPicker() {
+  const { state, insertSkill, addSkill, deleteSkill } = useComposer()
+  const skills = state.settings.skills ?? []
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+
+  const pickFile = () => {
+    setError('')
+    fileRef.current?.click()
+  }
+
+  const onFile = async (f: File | undefined) => {
+    if (!f || busy) return
+    setError('')
+    const text = await f.text().catch(() => '')
+    if (!text.trim()) {
+      setError('文件是空的，换一个再试')
+      return
+    }
+    if (text.length > SKILL_CONTENT_MAX) {
+      setError(`文件过大（${(text.length / 1024).toFixed(0)}KB，限 ${SKILL_CONTENT_MAX / 1000}KB）`)
+      return
+    }
+    setBusy(true)
+    try {
+      const name = skillNameFromFile(f.name)
+      // 同名视为覆盖更新：先问一句，避免手滑覆盖已有全文。
+      const dup = skills.find((s) => s.name === name)
+      if (dup && !confirm(`已存在同名 Skill「${name}」，用新文件覆盖它的全文吗？`)) return
+      await addSkill({ name, content: text, sourceName: f.name })
+    } finally {
+      setBusy(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const onDelete = async (id: string) => {
+    if (confirmId !== id) {
+      // 第一击：行内确认态（沿用 model-chip is-confirm 的红描边语言）
+      setConfirmId(id)
+      return
+    }
+    setConfirmId(null)
+    await deleteSkill(id)
+  }
+
+  return (
+    <div className="toc skill-list">
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".md,.markdown,.txt,text/markdown,text/plain"
+        style={{ display: 'none' }}
+        aria-label="上传 skill 文件"
+        onChange={(e) => void onFile(e.target.files?.[0])}
+      />
+      <button
+        type="button"
+        className="toc-item toc-upload"
+        onClick={pickFile}
+        disabled={busy}
+        title="上传 .md / .txt（全文存盘，输入框只显示红色名称胶囊）"
+      >
+        <span className="toc-num">＋</span>
+        <span className="toc-text">
+          <span className="toc-label">{busy ? '上传中…' : '上传 Skill'}</span>
+          <span className="toc-en">Upload .md / .txt</span>
+        </span>
+      </button>
+      {error && <div className="plate-err" style={{ padding: '6px 0' }}>{error}</div>}
+      {skills.length === 0 && !error && (
+        <div className="skill-empty">暂无 Skill，点上面上传第一个</div>
+      )}
+      {skills.map((s, i) => (
+        <button
+          key={s.id}
+          type="button"
+          className={`toc-item skill-row${confirmId === s.id ? ' is-confirm' : ''}`}
+          onClick={() => insertSkill(s.name)}
+          title={`点击插入「${s.name}」胶囊（全文 ${s.charCount} 字，生成时自动拼入）`}
+        >
+          <span className="toc-num">{String(i + 1).padStart(2, '0')}</span>
+          <span className="toc-text">
+            <span className="toc-label">{s.name}</span>
+            <span className="toc-en">{s.charCount} chars{s.sourceName ? ` · ${s.sourceName}` : ''}</span>
+          </span>
+          <span
+            role="button"
+            aria-label={confirmId === s.id ? `确认删除 ${s.name}` : `删除 ${s.name}`}
+            title={confirmId === s.id ? '再点一次确认删除' : '删除这个 Skill'}
+            className="skill-del"
+            onClick={(e) => { e.stopPropagation(); void onDelete(s.id) }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >{confirmId === s.id ? '确认？' : '×'}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+
+===== components/RefImageUploader.tsx (2977 chars) =====
+import { useState, useCallback, type DragEvent } from 'react'
+import { useComposer } from '../state/useComposer'
+import { fileToRefImage } from '../lib/imageFile'
+import type { RefImage } from '@shared/types'
+
+export function RefImageUploader() {
+  const { state, setRefs } = useComposer()
+  const refImages = state.refImages
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [dragging, setDragging] = useState(false)
+
+  const addFiles = useCallback(async (files: FileList | File[]) => {
+    setError(null)
+    setBusy(true)
+    try {
+      const next: RefImage[] = [...refImages]
+      for (const f of Array.from(files)) {
+        try {
+          const ref = await fileToRefImage(f)
+          next.push(ref)
+        } catch (e) {
+          setError(e instanceof Error ? e.message : '上传失败')
+        }
+      }
+      setRefs(renumber(next))
+    } finally {
+      setBusy(false)
+    }
+  }, [refImages, setRefs])
+
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragging(false)
+    if (e.dataTransfer?.files?.length) void addFiles(e.dataTransfer.files)
+  }
+
+  const onDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragging(true)
+  }
+
+  const onDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragging(false)
+  }
+
+  const remove = (id: string) => {
+    setRefs(renumber(refImages.filter((r) => r.id !== id)))
+  }
+
+  return (
+    <div className="plates">
+      <div
+        className={`plate-drop ${dragging ? 'is-drag' : ''}`}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onClick={() => document.getElementById('ref-file-input')?.click()}
+      >
+        <div className="plate-drop-text">
+          {busy ? '正在处理' : dragging ? '放下以加入' : '拖入或点击 · JPG / PNG / WebP'}
+        </div>
+        <input
+          id="ref-file-input"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            if (e.target.files?.length) void addFiles(e.target.files)
+            e.target.value = ''
+          }}
+        />
+      </div>
+      {error && <div className="plate-err">{error}</div>}
+      {refImages.length > 0 && (
+        <div className="plate-grid">
+          {refImages.map((r) => (
+            <div key={r.id} className="plate">
+              <img src={r.dataUrl} alt={r.name} />
+              <span className="plate-idx">{String(r.index).padStart(2, '0')}</span>
+              <button type="button" onClick={(e) => { e.stopPropagation(); remove(r.id) }}
+                className="plate-rm" aria-label="移除">×</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function renumber(refs: RefImage[]): RefImage[] {
+  return refs.map((r, i) => ({ ...r, index: i + 1 }))
+}
+
+
+===== components/PreviewBox.tsx (23415 chars) =====
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useComposer } from '../state/useComposer'
+
+// print-frame 边长：实测所在列的可用宽×行高后取 min（封顶 560px，防超大屏糊成一片）。
+// 不再写死 400：窗口拉大拉小，正方形永远取“当前空间里最大的合法边长”。
+function usePrintSize(colRef: React.RefObject<HTMLDivElement | null>): number {
+  const [size, setSize] = useState(400)
+  useLayoutEffect(() => {
+    const el = colRef.current
+    if (!el) return
+    const measure = () => {
+      const row = el.parentElement
+      const head = el.parentElement?.querySelector(':scope > .eyebrow')
+      const rowH = row?.clientHeight ?? 400
+      const headH = head instanceof HTMLElement ? head.offsetHeight : 28
+      const w = el.clientWidth
+      // 行高 - header - 列内 gap ≈ 正方形可用高度；列宽即宽度上限
+      const next = Math.max(200, Math.min(560, w, rowH - headH - 2))
+      setSize((prev) => (Math.abs(prev - next) < 1 ? prev : next))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    if (el.parentElement) ro.observe(el.parentElement)
+    ro.observe(el)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [colRef])
+  return size
+}
+
+export function PreviewBox() {
+  const { state } = useComposer()
+  const { previewEntry, status, error } = state
+  const colRef = useRef<HTMLDivElement | null>(null)
+  const SIZE = Math.round(usePrintSize(colRef))
+  const images = previewEntry?.images ?? []
+  const [idx, setIdx] = useState(0)
+  // P1-5缩放下界：clamp(0.2,4.0)函数式更新，中心恒中，关闭重置
+  const [scale, setScale] = useState(1)
+  const clampScale = (v: number) => Math.min(4.0, Math.max(0.2, v));
+  const zoomBy = (d: number) => { console.log('[zoom] delta=', d); setScale((ss) => clampScale(Number((ss + d).toFixed(3)))); };
+  const [viewer, setViewer] = useState(false)
+
+  // When a new entry lands (or images go away), reset to first plate and
+  // close any open viewer so the UI doesn't get stuck on a stale image.
+  useEffect(() => {
+    setIdx(0)
+    setViewer(false)
+    setScale(1)
+  }, [previewEntry?.id])
+
+  // Keyboard navigation while the viewer is open.
+  useEffect(() => {
+    if (!viewer) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewer(false)
+      else if (e.key === 'ArrowLeft')  setIdx((i) => (i - 1 + images.length) % images.length)
+      else if (e.key === 'ArrowRight') setIdx((i) => (i + 1) % images.length)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [viewer, images.length])
+
+  const current = images[idx]
+  const isLoading = status === 'loading'
+  const isEmpty = !isLoading && images.length === 0
+
+  // 缺失图兜底：生成图文件可能被“清理缓存”删掉（历史条目保留），
+  // 此时 <img> 会 error，用虚线占位代替破图图标。
+  const [broken, setBroken] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    setBroken(new Set())
+  }, [previewEntry?.id])
+  const markBroken = (file: string) =>
+    setBroken((s) => {
+      if (s.has(file)) return s
+      const next = new Set(s)
+      next.add(file)
+      return next
+    })
+
+  // Save button.
+  //
+  //   count === 1  → single Save-As dialog with the proper .png filter
+  //                   (cleaner UX: user expects one file picker, not a
+  //                   directory picker, for a single image).
+  //   count  >  1  → directory picker, write every plate into the
+  //                   chosen folder in one shot (single-shot workflow).
+  const downloadAll = () => {
+    if (images.length === 0) return
+    if (images.length === 1) {
+      const first = images[0]
+      if (!first) return
+      void window.api.downloadHistoryFile(first.file)
+    } else {
+      void window.api.downloadHistoryFiles(images.map((i) => i.file))
+    }
+  }
+
+  const openAt = (i: number) => {
+    if (images.length === 0) return
+    setIdx(((i % images.length) + images.length) % images.length)
+    setViewer(true)
+  }
+
+  // -------- gallery (thumbnail) view --------
+  const box = (
+    <div className="print" ref={colRef} style={{ width: '100%' }}>
+      <div
+        className="print-frame"
+        style={{ width: SIZE, height: SIZE, padding: 0, position: 'relative' }}
+      >
+        {isLoading ? (
+          <Spinner />
+        ) : isEmpty ? (
+          <EmptyState error={error} />
+        ) : (
+          <div className="gallery" style={{ transform: `scale(${scale})`, transformOrigin: 'center center' }}>
+        {/* P1-5缩放条 */}
+            {images.map((img, i) => (
+              <button
+                key={img.file}
+                type="button"
+                className="gallery-cell"
+                onClick={() => openAt(i)}
+                aria-label={`Open plate ${i + 1} of ${images.length}`}
+              >
+                {broken.has(img.file) ? (
+                  <span className="gallery-missing">missing file</span>
+                ) : (
+                  <img src={img.url} alt="" draggable={false} onError={(e) => { console.log('[file] img onError', img.file, (e.target as HTMLImageElement).src.slice(0, 120)); markBroken(img.file) }} />
+                )}
+                <span className="gallery-idx">{String(i + 1).padStart(2, '0')}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!isEmpty && !isLoading && (
+          <div className="gallery-zoombar" style={{ position: 'absolute', right: 8, top: 8, display: 'flex', gap: 4 }}>
+            <button type="button" aria-label="缩小" onClick={(e) => { e.stopPropagation(); zoomBy(-0.2) }}>−</button>
+            <button type="button" aria-label="放大" onClick={(e) => { e.stopPropagation(); zoomBy(0.2) }}>＋</button>
+            <button type="button" aria-label="重置" onClick={(e) => { e.stopPropagation(); console.log('[zoom] reset'); setScale(1) }}>1:1</button>
+          </div>
+        )}
+        {/* Print label — sits on the frame border. */}
+        {current && (
+          <div className="print-index">
+            Print № <strong>{images.length ? '0001' : '----'}</strong>
+          </div>
+        )}
+
+        {/* Save — bottom-right of the frame. Downloads every plate at
+            once (one folder picker, all files written). Label reflects
+            count so users know what they're getting. */}
+        {current && (
+          <button
+            type="button"
+            className="print-save"
+            onClick={(e) => { e.stopPropagation(); downloadAll() }}
+            aria-label="保存全部图片"
+            title="一键下载全部生成的图片"
+          >
+            ↓ Save {images.length > 1 ? `×${images.length}` : ''}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
+  if (viewer) {
+    return (
+      <Viewer
+        images={images}
+        idx={idx}
+        setIdx={setIdx}
+        onClose={() => setViewer(false)}
+        onSaveCurrent={() => {
+          if (!current) return
+          void window.api.downloadHistoryFile(current.file)
+        }}
+      />
+    )
+  }
+
+  return box
+}
+
+// ---------------------------------------------------------------------------
+// Viewer — fullscreen lightbox with keyboard nav, drag nav, right-click save.
+//
+// Gesture model:
+//   - Press (left button)  → start a tentative drag, no commit yet.
+//   - Move < 8px on release  → it was a click; close the viewer.
+//   - Move ≥ 8px on release  → it was a drag; flip plate if past the
+//                              threshold OR if the flick velocity is high.
+//                              Animate the slide-out / slide-in instead
+//                              of jumping — see `commitPage()` below.
+// ---------------------------------------------------------------------------
+
+function Viewer({
+  images, idx, setIdx, onClose, onSaveCurrent,
+}: {
+  images: { file: string; url: string }[]
+  idx: number
+  setIdx: (updater: (i: number) => number) => void
+  onClose: () => void
+  onSaveCurrent: () => void
+}) {
+  // Live translate in pixels. Negative = dragging left (next plate will
+  // slide in from the right). Positive = dragging right (previous plate).
+  const [dx, setDx] = useState(0)
+  // True only once we've passed the movement threshold — separates
+  // "click to close" from "drag to page".
+  const [dragging, setDragging] = useState(false)
+  // When a flip has been committed (drag past threshold or fast flick)
+  // we animate dx to ±stageW, then change idx and animate back to 0.
+  // `flying` is the state that suppresses click-close for the rest of
+  // this gesture.
+  const [flying, setFlying] = useState<null | { direction: 1 | -1 }>(null)
+
+  // Refs — values that change frequently during a drag and that we
+  // don't want to put in React state (would re-render every frame).
+  const stateRef = useRef({
+    startX: 0,
+    lastX: 0,
+    lastT: 0,
+    vx: 0,        // px/ms; signed
+    moved: 0,      // distance moved since press (signed)
+    raf: 0,
+    // True for one event tick after the user releases a drag, so the
+    // backdrop click that would otherwise close the viewer doesn't fire.
+    justDragged: false,
+  })
+
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const FLICK_THRESHOLD = 60   // px — past this on release, commit
+  const VELOCITY_THRESHOLD = 0.35 // px/ms — fast flick commits even below threshold
+  const DRAG_THRESHOLD = 8      // px — first move past this claims the drag
+
+  const onImgError = () => onClose()
+
+  // Drive dx through requestAnimationFrame so the drag follows the cursor
+  // with sub-frame latency and the slide-out/in animations ease smoothly.
+  const tick = (nextDx: number) => {
+    cancelAnimationFrame(stateRef.current.raf)
+    stateRef.current.raf = requestAnimationFrame(() => setDx(nextDx))
+  }
+
+  const onPointerDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    if (flying) return // ignore press during commit animation
+    const s = stateRef.current
+    s.startX = e.clientX
+    s.lastX = e.clientX
+    s.lastT = performance.now()
+    s.vx = 0
+    s.moved = 0
+    setDragging(false)
+    setDx(0)
+  }
+
+  // Use mousemove (not pointermove) so the handler only fires while a
+  // mouse button is down. Pointermove fires on hover too, which made the
+  // image drift the moment the user moved the cursor over it (s.moved was
+  // non-zero because s.startX defaults to 0).
+  // We still check e.buttons defensively — some setups can deliver
+  // mousemove with no buttons down.
+  const onPointerMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.buttons === 0) return // no button pressed = pure hover, ignore
+    const s = stateRef.current
+    const cur = e.clientX
+    const now = performance.now()
+    const dt = Math.max(1, now - s.lastT)
+    s.vx = (cur - s.lastX) / dt   // px/ms, signed
+    s.lastX = cur
+    s.lastT = now
+    s.moved = cur - s.startX
+
+    if (!s.moved) return
+    // Once we've moved past the threshold, treat this as a drag.
+    if (!dragging && Math.abs(s.moved) > DRAG_THRESHOLD) setDragging(true)
+    if (flying) return
+    // Slight resistance past the first 30% so the gesture feels "weighted"
+    const stageW = stageRef.current?.clientWidth ?? window.innerWidth
+    const resist = s.moved > 0
+      ? Math.max(0, s.moved - stageW * 0.3)
+      : Math.min(0, s.moved + stageW * 0.3)
+    const visual = s.moved - resist * 0.4
+    tick(visual)
+  }
+
+  // Animate dx to a target value with custom ease (used by commitPage +
+  // snapBack). Returns when the animation has effectively stopped.
+  const animateTo = (target: number, durationMs: number, onDone: () => void) => {
+    cancelAnimationFrame(stateRef.current.raf)
+    const startVal = dx
+    const startT = performance.now()
+    const step = () => {
+      const t = Math.min(1, (performance.now() - startT) / durationMs)
+      // ease-out cubic: 1 - (1-t)^3
+      const eased = 1 - Math.pow(1 - t, 3)
+      const v = startVal + (target - startVal) * eased
+      setDx(v)
+      if (t < 1) {
+        stateRef.current.raf = requestAnimationFrame(step)
+      } else {
+        onDone()
+      }
+    }
+    stateRef.current.raf = requestAnimationFrame(step)
+  }
+
+  // User released after a drag. Decide 
+
+===== components/MainPane.tsx (1194 chars) =====
+import { PromptEditor } from './PromptEditor'
+import { SkillPicker } from './SkillPicker'
+import { PreviewBox } from './PreviewBox'
+import { HistoryPanel } from './HistoryPanel'
+import { useComposer } from '../state/useComposer'
+
+export function MainPane() {
+  const { state } = useComposer()
+  const skillCount = state.settings.skills?.length ?? 0
+  return (
+    <main className="main">
+      <section className="main-row-top">
+        <div className="editor-col">
+          <div className="eyebrow">
+            <span>Composition</span>
+          </div>
+          <PromptEditor />
+        </div>
+        <div className="templates-col">
+          <div className="eyebrow">
+            <span>Skills</span>
+            <span style={{ marginLeft: 'auto', color: 'var(--text-3)' }}>{skillCount}</span>
+          </div>
+          <SkillPicker />
+        </div>
+      </section>
+
+      <section className="main-row-bottom">
+        <div className="print-col">
+          <div className="eyebrow">
+            <span>Output</span>
+          </div>
+          <PreviewBox />
+        </div>
+        <div className="archive-col">
+          <HistoryPanel />
+        </div>
+      </section>
+    </main>
+  )
+}
+
+===== ../shared/skills.ts (2126 chars) =====
+import type { Skill } from './types'
+
+// Skill 胶囊 token：`⟦skill:NAME⟧`。选用生僻括号对做定界，
+// 用户正常输入几乎不可能敲出来，回解析不会误伤正文。
+// NAME 内不允许 `⟧` / `]` / 换行，清洗规则 main + renderer 共用同一份。
+export const SKILL_TOKEN_RE = /⟦skill:([^\]⟧\r\n]+)⟧/g
+
+export function normalizeSkillName(input: unknown): string {
+  const s = typeof input === 'string' ? input : ''
+  // `"`/`'` 去掉：名字会写进 HTML 属性 data-skill="NAME"，留引号会打破标签。
+  // `&`/`<>` 去掉：渲染前要过 HTML escape，留着会导致胶囊匹配不上（回解析错位）。
+  return s.replace(/[\r\n⟦⟧\]"'&<>]/g, '').trim().slice(0, 60)
+}
+
+// 单个 content 上限 200KB（约 10 万汉字），超限整条丢弃，
+// 防止 settings.json 体积爆炸拖慢每次启动加载。
+export const SKILL_CONTENT_MAX = 200_000
+
+export function newSkillId(): string {
+  try {
+    // 浏览器/Electron 渲染进程：优先用 Web Crypto
+    const c = (globalThis as unknown as { crypto?: { randomUUID?: () => string } }).crypto
+    if (c?.randomUUID) return c.randomUUID()
+  } catch { /* fall through */ }
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
+}
+
+// 与 normalizeModelList 同风格的清洗：去空/超长/超大 → 按名去重 → 兜底 []。
+export function normalizeSkillList(input: unknown): Skill[] {
+  if (!Array.isArray(input)) return []
+  const seen = new Set<string>()
+  const out: Skill[] = []
+  for (const x of input) {
+    if (!x || typeof x !== 'object') continue
+    const r = x as Partial<Skill>
+    const name = normalizeSkillName(r.name)
+    const content = typeof r.content === 'string' ? r.content : ''
+    if (!name || !content.trim() || content.length > SKILL_CONTENT_MAX) continue
+    if (seen.has(name)) continue
+    seen.add(name)
+    out.push({
+      id: typeof r.id === 'string' && r.id ? r.id : newSkillId(),
+      name,
+      content,
+      sourceName: typeof r.sourceName === 'string' ? r.sourceName : '',
+      charCount: typeof r.charCount === 'number' ? r.charCount : content.length,
+      createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(),
+    })
+  }
+  return out
+}
+
+// 从文件名推默认 skill 名：去扩展名 → 清洗 → 为空则回退。
+export function skillNameFromFile(fileName: string): string {
+  const base = fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim()
+  return normalizeSkillName(base) || '未命名Skill'
+}
+
+

@@ -20,7 +20,7 @@ export function App() {
     <>
       <header className="drag-strip">
         <div className="brand">
-          <span>gpt-image-2</span>
+          <span>gpt-image</span>
           <span className="mark">studio</span>
         </div>
         <button type="button" className="icon-btn" onClick={() => setSettingsOpen(true)}>

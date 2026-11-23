@@ -4,6 +4,12 @@ const ALLOWED: RefImage['mime'][] = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_LONG_EDGE = 2048
 const QUALITY = 0.92
 
+// renderer禁止/Users绝对路径上屏
+// 真实src打日志便于定位，img onError负责兜底。
+export function isSafeRenderSrc(s: string): boolean {
+  return !(s || '').includes('/Users/');
+}
+
 function nanoid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
 }
@@ -16,6 +22,8 @@ export async function fileToRefImage(file: File): Promise<RefImage> {
   const img = await loadImage(dataUrl)
   const { canvas, w, h } = downscale(img, MAX_LONG_EDGE)
   const out = canvas.toDataURL('image/jpeg', QUALITY)
+  const localPath = (file as File & { path?: string }).path ?? '';
+  console.log('[localFile] pick', file.name, w + 'x' + h, approxBytes(out) + 'B', localPath ? 'has-path' : 'no-path');
   return {
     id: nanoid(),
     index: 0, // assigned by caller after re-numbering

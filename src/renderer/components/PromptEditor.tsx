@@ -8,14 +8,88 @@ import { GenerateButton } from './GenerateButton'
 
 const PLACEHOLDER = '描述你想生成的画面… 输入 @ 引用已上传的参考图，点击上方模板快速填充'
 
-/** 把纯文本里的 `@图N` (N 是数字) 替换成高亮 HTML。其它字符 escaped。 */
+// P0-1 token-aware helpers
+export function skillTokenFor(name: string): string {
+  return `⟦skill:${name}⟧`
+}
+export function chipTextFor(name: string): string {
+  return `◆ ${name}`
+}
+export function shortToLongCaret(longText: string, shortCaret: number): number {
+  if (shortCaret <= 0) return shortCaret
+  const RE = /⟦skill:([^\]⟧\r\n]+)⟧/g
+  let delta = 0
+  let m: RegExpExecArray | null
+  while ((m = RE.exec(longText)) !== null) {
+    const name = m[1] ?? ''
+    const longStart = m.index
+    const shortStart = longStart - delta
+    const chipLen = 2 + name.length
+    if (shortCaret < shortStart) break
+    if (shortCaret === shortStart) return longStart
+    if (shortCaret <= shortStart + chipLen) return longStart + m[0].length
+    delta += m[0].length - chipLen
+  }
+  return shortCaret + delta
+}
+export function longToShortOffset(longText: string, longIdx: number): number {
+  if (longIdx <= 0) return longIdx
+  const RE2 = /⟦skill:([^\]⟧\r\n]+)⟧/g
+  let delta2 = 0
+  let m2: RegExpExecArray | null
+  while ((m2 = RE2.exec(longText)) !== null) {
+    const longStart2 = m2.index
+    const longEnd2 = longStart2 + m2[0].length
+    if (longIdx < longEnd2) {
+      if (longIdx >= longStart2) {
+        const nm = m2[1] ?? ''
+        return longStart2 - delta2 + 2 + nm.length
+      }
+      break
+    }
+    const nm2 = m2[1] ?? ''
+    delta2 += m2[0].length - (2 + nm2.length)
+  }
+  return longIdx - delta2
+}
+export function normalizeRefTokens(text: string): string {
+  if (!text) return text
+  return text.replace(/@@+/g, '@')
+}
+export function findActiveQueryPure(text: string, caretPos: number): { atStart: number; atEnd: number; query: string } {
+  const pos = Math.min(Math.max(caretPos, 0), text.length)
+  if (pos <= 0) return { atStart: -1, atEnd: -1, query: '' }
+  for (let i = pos; i > 0; i--) {
+    const ch = text[i - 1]
+    if (ch === '@') {
+      const rest = text.slice(i, pos)
+      if (/^(?:参考图|图)\d/.test(rest)) return { atStart: -1, atEnd: -1, query: '' }
+      return { atStart: i - 1, atEnd: pos, query: rest }
+    }
+    if (/\s/.test(ch ?? '')) return { atStart: -1, atEnd: -1, query: '' }
+  }
+  return { atStart: -1, atEnd: -1, query: '' }
+}
+
+/** 把纯文本里的 `@图N` (N 是数字) 替换成高亮 HTML，
+ *  把 `⟦skill:NAME⟧` 替换成红色 Skill 胶囊。其它字符 escaped。
+ *  注意顺序：先 escape → skill token（含 ⟦⟧，escape 不动它们）→ @图N。 */
 export function mentionizeMarkup(plain: string): string {
   if (!plain) return ''
   const escaped = plain
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-  return escaped.replace(
+  // Skill 胶囊：只显示名字（全文生成时后台拼入）。
+  // 名字已在入库时去掉 HTML 特殊字符（见 normalizeSkillName），直接匹配即可。
+  const withSkills = escaped.replace(
+    /⟦skill:([^\]⟧\r\n]+)⟧/g,
+    (_m, n) => {
+      const name = String(n).replace(/["']/g, '')
+      return `<span class="skill-chip" data-skill="${name}">◆ ${name}</span>`
+    },
+  )
+  return withSkills.replace(
     /@(?:参考图|图)(\d+)/g,
     (_m, n) => `<span class="mention" data-mention="${n}">@图${n}</span>`,
   )
@@ -35,8 +109,21 @@ export function mentionizeMarkup(plain: string): string {
 export function htmlToText(html: string): string {
   if (!html) return ''
   let s = html.replace(/<br\s*\/?>/gi, '')
+  // Skill 胶囊是整段 token 的可视化：span 被删一半/属性丢失时，
+  // 里面的 `◆ 名字` 裸文本不能残留，统一还原成 token 再做完整性收尾。
+  s = s.replace(/<span[^>]*data-skill="([^"]*)"[^>]*>.*?<\/span>/gi, (_m, n) => `⟦skill:${n}⟧`)
+  s = s.replace(/<span[^>]*class="[^"]*skill-chip[^"]*"[^>]*>.*?<\/span>/gi, '')
+  // P0-1 修复：保留 @图N 提及，防止 reference image 链路丢失。
+  // 将 <span class="mention" data-mention="N">@图N</span> 还原为文本 @图N，
+  // 确保 prompt 发送给模型时包含 reference 锚点。
+  s = s.replace(/<span[^>]*class="mention"[^>]*data-mention="(\d+)"[^>]*>(@图\d+)<\/span>/gi, (_m, idx) => `@图${idx}`)
   s = s.replace(/<[^>]+>/g, '')
   s = s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  // 残缺 token 收尾：胶囊只删了一半时会剩下 `⟦skill:名字` / `名字⟧` 碎片，
+  // 统一清除，保证文本模型里要么是完整 token、要么什么都没有。
+  s = s.replace(/⟦skill:[^\]⟧\r\n]*$/g, '')
+  s = s.replace(/^[^\[⟦\r\n]*⟧/g, '')
+  s = s.replace(/⟦skill:[^\]⟧\r\n]*[\r\n]/g, '')
   return s
 }
 
@@ -95,7 +182,8 @@ function caretTextOffset(el: HTMLElement): number {
  *  chip (an old @图N), not to a fresh query the user is typing. */
 function isMentionChipAt(el: HTMLElement, text: string, idx: number): boolean {
   if (text[idx] !== '@') return false
-  let node = findTextPos(el, idx)
+  // P0-1: idx 是 token 长下标，DOM 是短文本，先换算回短 offset 再定位 Text 节点。
+  let node = findTextPos(el, longToShortOffset(text, idx))
   if (!node) return false
   // idx may sit on a node boundary (end of a text node); the '@' then starts
   // the NEXT text node (e.g. a chip that begins a new line).
@@ -124,7 +212,9 @@ function isMentionChipAt(el: HTMLElement, text: string, idx: number): boolean {
  *  re-render / IME); handleInput keeps it fresh from the last known caret. */
 function findActiveQuery(el: HTMLElement, text: string, fallbackCaret: number): { atStart: number; atEnd: number; query: string } {
   const live = caretTextOffset(el)
-  const caretPos = live >= 0 ? Math.min(live, text.length) : Math.min(fallbackCaret, text.length)
+  const rawPos = live >= 0 ? Math.min(live, text.length) : Math.min(fallbackCaret, text.length)
+  // P0-1 token-aware: live/fallback 是 DOM 短 offset，先换算到 token 长 offset 再扫，skill 前/中/后 @ 都弹。
+  const caretPos = Math.min(shortToLongCaret(text, rawPos), text.length)
   if (caretPos <= 0) return { atStart: -1, atEnd: -1, query: '' }
 
   for (let i = caretPos; i > 0; i--) {
@@ -159,6 +249,7 @@ export function PromptEditor() {
   // Last known caret offset in the canonical text model. Used by findActiveQuery
   // only when the live selection is unavailable (React re-render / IME).
   const lastCaretRef = useRef(0)
+  const isComposingRef = useRef(false)
   const [mentionMenu, setMentionMenu] = useState<{
     open: boolean
     atStart: number
@@ -200,7 +291,11 @@ export function PromptEditor() {
   const handleInput = () => {
     const el = rootRef.current
     if (!el) return
-    const text = htmlToText(el.innerHTML)
+    // composition guard：IME拼写中不解析@，不上菜单，不改state
+    if (isComposingRef.current) return
+    const rawText = htmlToText(el.innerHTML)
+    // P0-1: 消灭 @@ 残留。
+    const text = normalizeRefTokens(rawText)
     lastWrittenRef.current = text
     setPrompt(text)
 
@@ -270,8 +365,8 @@ export function PromptEditor() {
       realEnd = r.atEnd
     }
 
-    const start = findTextPos(el, realStart)
-    const end = findTextPos(el, realEnd)
+    const start = findTextPos(el, longToShortOffset(text, realStart))
+    const end = findTextPos(el, longToShortOffset(text, realEnd))
     if (!start || !end) return
 
     el.focus()
@@ -373,6 +468,8 @@ export function PromptEditor() {
           ref={rootRef}
           contentEditable
           suppressContentEditableWarning
+          onCompositionStart={() => { isComposingRef.current = true }}
+          onCompositionEnd={() => { isComposingRef.current = false }}
           spellCheck={false}
           onInput={handleInput}
           onKeyDown={handleKeyDown}

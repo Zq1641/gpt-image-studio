@@ -1,0 +1,287 @@
+/* Window shell: vibrancy + paper grain + ruled guides. */
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--body-size);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  letter-spacing: 0.005em;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Drag strip for hiddenInset — keep transparent to let vibrancy show */
+.drag-strip {
+  height: 36px;
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px 0 84px;        /* leave space for traffic lights */
+  flex: 0 0 auto;
+  position: relative;
+}
+.drag-strip .brand {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 11px;
+  letter-spacing: var(--track-loose);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.drag-strip .brand .mark {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 17px;
+  font-weight: 400;
+  color: var(--text-1);
+  text-transform: none;
+  letter-spacing: -0.01em;
+}
+.drag-strip button,
+.drag-strip input {
+  -webkit-app-region: no-drag;
+}
+.drag-strip .icon-btn {
+  background: transparent;
+  border: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--text-2);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  letter-spacing: var(--track-mid);
+}
+.drag-strip .icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+/* Main horizontal layout. */
+.workbench {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Sidebar: warm tint with paper grain. Slight inner shadow on the right edge. */
+.sidebar {
+  width: 280px;
+  flex: 0 0 280px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 100%),
+    var(--bg-paper-tint);
+  border-right: 1px solid var(--line);
+  padding: 8px 22px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  overflow-y: auto;
+  position: relative;
+}
+.sidebar::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; right: 0;
+  width: 1px;
+  background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.04) 50%, transparent 100%);
+  pointer-events: none;
+}
+
+/* Main: paper with faint vertical guides every 240px.
+   NO vertical scroll — entire window must fit in 820px viewport. */
+.main {
+  flex: 1;
+  background: var(--bg-page);
+  background-image:
+    radial-gradient(circle at 25% 35%, rgba(26, 24, 21, 0.025) 0px, transparent 1.5px),
+    radial-gradient(circle at 75% 65%, rgba(26, 24, 21, 0.025) 0px, transparent 1.5px),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 239px,
+      rgba(26, 24, 21, 0.025) 239px,
+      rgba(26, 24, 21, 0.025) 240px
+    );
+  background-size: 9px 9px, 11px 11px, auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  padding: 12px 22px 16px;
+  gap: 12px;
+}
+
+/* Common: uppercase small label, like a darkroom equipment label */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--track-loose);
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 500;
+  margin-bottom: 0;
+  padding: 6px 0;
+  min-height: 24px;
+  box-sizing: border-box;
+}
+.eyebrow::before {
+  content: '';
+  width: 12px;
+  height: 1px;
+  background: var(--text-3);
+  opacity: 0.6;
+}
+.eyebrow .num {
+  color: var(--text-2);
+}
+
+/* Sidebar section grouping */
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+}
+.sidebar-section:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+/* ---------- Main pane: top row = editor + templates ----------
+   Both columns share the row height (driven by the templates TOC).
+   The prompt editor and ce-stage stretch to fill the editor column,
+   so the prompt box's bottom edge lines up with the TOC's bottom edge. */
+.main-row-top {
+  display: grid;
+  /* 流式自适应：编辑器吃掉所有剩余宽度，右列在 170~210px 间浮动。
+     窗口拉大时两列一起变宽，不再留空；字体字号保持不变。 */
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 210px);
+  gap: 16px;
+  align-items: stretch;
+  flex: 0 0 auto;
+}
+
+.main-row-bottom {
+  display: grid;
+  /* 流式自适应：两列等分剩余宽度（不再是写死的 400px+400px + 左对齐留空）。
+     高度由 flex: 1 吃掉窗口剩余纵空间：Output 正方形边长取
+     min(列宽, 行高)（PreviewBox 用 ResizeObserver 实测），
+     Archive 列表 flex:1 + 内部滚动，保证两区顶部永远对齐。 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.editor-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  position: relative;
+}
+.templates-col {
+  border-left: 1px solid var(--rule);
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ---------- Print + Archive columns ----------
+   Both columns share identical structure: a header row + a stretched box.
+   流式自适应（窗口任意缩放都不乱）：
+     - print-frame 不再是写死的 400×400：边长由 PreviewBox 实测
+       列宽×行高后取 min，保证永远是“当前空间里最大的正方形”，
+       顶部永远和 Archive 列表顶部对齐。
+     - archive-list flex:1 吃掉列内剩余高度 + 内部滚动，
+       历史再长也不把底边撑下去。
+   Mechanics: .main-row-bottom is a grid with `align-items: stretch`, so both
+   columns are already row-height tall. Each column is a flex column where the
+   header takes its intrinsic height and the box takes the rest (`flex: 1`
+   + `min-height: 0`). archive-list additionally scrolls internally
+   (`overflow: auto`) so long histories never push the bottom edge down. */
+.print-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 0 0 auto;
+  align-self: stretch;
+}
+.archive-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  align-self: stretch;
+}
+.print-col .print,
+.archive-col .archive {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Headers pin to the top … */
+.print-col > .eyebrow,
+.archive-col .archive-head {
+  flex: 0 0 auto;
+}
+/* … and the boxes share the remaining space, so both tops line up.
+   print-frame 本体尺寸由 PreviewBox 按实测空间设定（正方形），
+   这里只负责把它推到底边、和 Archive 同顶。 */
+.print-col .print-frame {
+  margin-top: auto;          /* print column: box hugs the bottom … */
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+.archive-col .archive-list {
+  margin-top: 0;
+  flex: 1 1 auto;            /* archive column: box stretches … */
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Bottom-row header equality: Output (.eyebrow) and Archive (.archive-head)
+   must be exactly the same height, otherwise the two 400px boxes below them
+   start at different Y and the tops never line up. The pill buttons
+   (Cache / Clear, ~26px tall) are the tallest header content, so both
+   headers are fixed to 28px — independent of button presence, so the empty
+   state (Cache only) aligns exactly like the filled state (Cache + Clear). */
+.print-col > .eyebrow,
+.archive-col .archive-head {
+  height: 28px;
+  min-height: 28px;
+  box-sizing: border-box;
+}
+.print-col > .eyebrow {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.archive-col .archive-head {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+input,textarea,[contenteditable]{user-select:text;-webkit-user-select:text}

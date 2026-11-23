@@ -1,7 +1,7 @@
-# gpt-image-2 · studio
+# gpt-image · studio
 
 <p align="center">
-  <img src=".github/assets/banner.png" alt="gpt-image-2 studio — desktop client for OpenAI's gpt-image-2" />
+  <img src=".github/assets/banner.png" alt="gpt-image studio — desktop client for GPT image generation" />
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 
 ### 它是什么
 
-**gpt-image-2 · studio** 是一个 macOS 桌面客户端，用来调用 OpenAI 的 `gpt-image-2` 图像生成模型。
+**gpt-image · studio** 是一个 macOS 桌面客户端，用来调用 OpenAI 的 GPT 图像生成模型（`gpt-image-2` / `gpt-image-2.5` 等）。
 它把官方网页/SDK 里的那些繁琐流程——打开浏览器、配置代理、复制粘贴 Base64、下载图片——
 全部塞进了一个安静、克制、可归档的工作台里。
 
@@ -41,7 +41,7 @@
 - 🎚 **三档质量**：`Low / Med / High`
 - 📚 **5 个内置预设**：电商 / 摄影 / 海报 / 创意 / 艺术
 - 🧷 **参考图上传**：拖入或点击，支持 JPG / PNG / WebP
-- 🗂 **本机归档**：最近 5 次生成可回看，提示词 + 比例 + 分辨率全保留
+- 🗂 **本机归档**：全量历史可回看，提示词 + 比例 + 分辨率 + 参考图快照全保留
 - 💾 **一键保存**：把生成的图直接存到磁盘
 - 🔑 **自带 Key（BYO）**：你配你的 API Key，成本只走你的通道
 
@@ -78,8 +78,8 @@
 
 ### 📦 安装
 
-1. 前往 [Releases](../../releases) 页面，下载最新的 `GPT Image 2-0.1.0-arm64.dmg`（约 94 MB）。
-2. 双击挂载 DMG，把 `GPT Image 2.app` 拖入 **Applications**。
+1. 前往 [Releases](../../releases) 页面，下载最新的 `GPT Image-0.1.0-arm64.dmg`（约 94 MB）。
+2. 双击挂载 DMG，把 `GPT Image.app` 拖入 **Applications**。
 3. 打开应用，在右上角 **Settings** 里填入你的 API Key 即可开始生图。
 
 > **⚠️ 安装提示"已损坏"？**
@@ -92,7 +92,7 @@
 >
 > 或者用一行命令解除隔离：
 > ```bash
-> xattr -cr "/Applications/GPT Image 2.app"
+> xattr -cr "/Applications/GPT Image.app"
 > ```
 > 详细的图文教程可以自行搜索「macOS 打开已损坏的应用程序」。
 
@@ -126,7 +126,7 @@ npm run dist:mac
 - [ ] Windows 11 (x64 / ARM64) 版本
 - [ ] Linux (AppImage) 版本
 - [ ] 多 API 服务商预设（官方 / Azure / 中转）
-- [ ] 历史归档扩展（>5 条）
+- [x] 历史归档全量保存（回填可恢复参考图）+ 缓存清理（按生成图 / 参考图快照 / 全部）
 - [ ] 提示词模板库
 - [ ] 批量任务队列
 
@@ -152,8 +152,9 @@ npm run dist:mac
 
 ### What it is
 
-**gpt-image-2 · studio** is a native macOS desktop client for OpenAI's `gpt-image-2`
-image generation model. It collapses the usual browser-and-SDK dance — opening a
+**gpt-image · studio** is a native macOS desktop client for OpenAI's GPT
+image generation models (`gpt-image-2` / `gpt-image-2.5` and compatible relays).
+It collapses the usual browser-and-SDK dance — opening a
 web console, configuring proxies, copying Base64, downloading plates — into a
 calm, opinionated, local workspace.
 
@@ -172,7 +173,7 @@ calm, opinionated, local workspace.
 - 🎚 **3 quality tiers**: `Low / Med / High`
 - 📚 **5 built-in presets**: E-Commerce / Photography / Poster Design / Creative Art / Fine Art
 - 🧷 **Reference plates**: drag-and-drop or click; JPG / PNG / WebP
-- 🗂 **Local archive**: the most recent 5 generations, full prompt + metadata
+- 🗂 **Local archive**: full history with prompt + metadata + reference snapshots
 - 💾 **One-click save** generated plates to disk
 - 🔑 **BYO API key**: you bring the key, you pay the provider — nothing else
 
@@ -214,8 +215,8 @@ This tool is **free**. Every image you generate is billed to **your own API key*
 ### 📦 Install
 
 1. Go to the [Releases](../../releases) page and download the latest
-   `GPT Image 2-0.1.0-arm64.dmg` (≈ 94 MB).
-2. Mount the DMG, drag `GPT Image 2.app` into **Applications**.
+   `GPT Image-0.1.0-arm64.dmg` (≈ 94 MB).
+2. Mount the DMG, drag `GPT Image.app` into **Applications**.
 3. Launch the app, open **Settings** in the top-right corner, paste your API key,
    and start generating.
 
@@ -230,7 +231,7 @@ This tool is **free**. Every image you generate is billed to **your own API key*
 >
 > Or remove the quarantine attribute in one command:
 > ```bash
-> xattr -cr "/Applications/GPT Image 2.app"
+> xattr -cr "/Applications/GPT Image.app"
 > ```
 > Search "macOS open damaged app" for a graphical walkthrough.
 
@@ -264,7 +265,7 @@ The build output lands in `release/`.
 - [ ] Windows 11 (x64 / ARM64) build
 - [ ] Linux (AppImage) build
 - [ ] Multi-provider presets (OpenAI / Azure / relays)
-- [ ] Extended history (>5 entries)
+- [x] Full history archive (refill restores reference plates) + cache janitor (plates / snapshots / all)
 - [ ] Prompt template library
 - [ ] Batch task queue
 

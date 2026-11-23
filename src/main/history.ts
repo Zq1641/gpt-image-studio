@@ -1,16 +1,46 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
-import { join, basename, extname } from 'node:path'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, renameSync } from 'node:fs'
+import { join, basename, extname, resolve, sep } from 'node:path'
 import { app, dialog, BrowserWindow } from 'electron'
-import type { HistoryEntry } from '../shared/types'
+import type { CacheStats, HistoryEntry } from '../shared/types'
+
+function userDataDir(): string {
+  return app.getPath('userData')
+}
 
 function indexPath(): string {
-  return join(app.getPath('userData'), 'history.json')
+  return join(userDataDir(), 'history.json')
 }
 
 function imagesDir(): string {
   const d = join(app.getPath('userData'), 'images')
   if (!existsSync(d)) mkdirSync(d, { recursive: true })
   return d
+}
+
+// 下载类 IPC 只接受「images/ 目录下的单个 png 文件名」，不接受任何路径。
+// 白名单 ^[A-Za-z0-9_.-]+\.png$ 直接挡掉 ../、绝对路径、分隔符和空字节；
+// 再加长度上限，避免超长文件名拖垮文件系统 / 对话框。
+const SAFE_IMAGE_FILENAME = /^[A-Za-z0-9_.-]+\.png$/
+const SAFE_IMAGE_FILENAME_MAX = 200
+
+export function isSafeImageFilename(name: unknown): name is string {
+  return (
+    typeof name === 'string' &&
+    name.length > 0 &&
+    name.length <= SAFE_IMAGE_FILENAME_MAX &&
+    SAFE_IMAGE_FILENAME.test(name) &&
+    !name.includes('..')
+  )
+}
+
+// 把通过白名单的文件名解析成 images/ 下的绝对路径，并再做一次 startsWith 兜底，
+// 确保最终读写的路径一定落在 imagesDir 内（防 join 之后的路径逃逸）。
+function safeImagePath(name: string): string | null {
+  if (!isSafeImageFilename(name)) return null
+  const dir = imagesDir()
+  const abs = resolve(join(dir, name))
+  if (abs !== join(dir, name) || !abs.startsWith(resolve(dir) + sep)) return null
+  return abs
 }
 
 function readIndex(): HistoryEntry[] {
@@ -22,14 +52,26 @@ function readIndex(): HistoryEntry[] {
     if (!Array.isArray(arr)) return []
     return arr
   } catch {
+    // history.json 损坏时：把坏文件改名为 history.corrupt-<时间戳>.json 留证，
+    // 返回空列表让应用照常启动。只备份、不删除——用户数据一条都不丢，
+    // 修好 JSON 后改回文件名即可恢复。
+    try {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      renameSync(p, join(userDataDir(), `history.corrupt-${stamp}.json`))
+    } catch { /* 备份失败也无妨，下次启动再试 */ }
     return []
   }
 }
 
 function writeIndex(arr: HistoryEntry[]): void {
+  const dir = userDataDir()
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  // 原子写：先写 tmp 再 rename，避免进程崩溃时 history.json 写一半变坏。
+  // tmp 与目标同目录，保证 rename 是同文件系统原子操作。
   const p = indexPath()
-  if (!existsSync(app.getPath('userData'))) mkdirSync(app.getPath('userData'), { recursive: true })
-  writeFileSync(p, JSON.stringify(arr, null, 2), 'utf-8')
+  const tmp = `${p}.tmp`
+  writeFileSync(tmp, JSON.stringify(arr, null, 2), 'utf-8')
+  renameSync(tmp, p)
 }
 
 export function listHistory(): HistoryEntry[] {
@@ -44,8 +86,30 @@ export function appendHistory(entry: HistoryEntry): HistoryEntry[] {
 }
 
 export function deleteHistory(id: string): HistoryEntry[] {
-  const arr = readIndex().filter((e) => e.id !== id)
-  writeIndex(arr)
+  const arr = readIndex()
+  const target = arr.find((e) => e.id === id)
+  const rest = arr.filter((e) => e.id !== id)
+  writeIndex(rest)
+  // 单条删除同时回收它独占的生成图文件：先收集剩余条目仍在引用的文件名，
+  // 只删除不再被任何条目引用的文件，避免误删多条历史共享同名 plate 的极端情况。
+  try {
+    const stillUsed = new Set<string>()
+    for (const e of rest) {
+      for (const img of e.images ?? []) {
+        if (img?.file) stillUsed.add(img.file)
+      }
+    }
+    const dir = imagesDir()
+    for (const img of target?.images ?? []) {
+      const f = img?.file
+      if (!f || stillUsed.has(f)) continue
+      if (f.includes('..') || f.includes('/') || f.includes('\\')) continue
+      const abs = join(dir, f)
+      if (existsSync(abs)) {
+        try { unlinkSync(abs) } catch { /* ignore */ }
+      }
+    }
+  } catch { /* GC 失败不影响删除本身 */ }
   return listHistory()
 }
 
@@ -60,11 +124,111 @@ export function clearHistory(): HistoryEntry[] {
   return []
 }
 
+// ---------------- 缓存统计 + 按项清理 ----------------
+// 体积口径：
+//   - imageBytes：images/ 目录下全部生成图文件的实际字节
+//   - historyBytes：history.json 文件体积（含内嵌的参考图快照）
+//   - refBytes：历史条目里 refImages[].dataUrl 的 base64 估算字节（history.json 的子集，
+//     单独列出来是为了让用户看清“参考图快照占了多少”，清理时可单独剥离）
+//   - totalBytes = imageBytes + historyBytes（用户磁盘上真实占用的合计数）
+
+function approxDataUrlBytes(dataUrl: string): number {
+  const i = dataUrl.indexOf(',')
+  const b64 = i >= 0 ? dataUrl.slice(i + 1) : dataUrl
+  return Math.floor(b64.length * 0.75)
+}
+
+export function getCacheStats(): CacheStats {
+  const dir = imagesDir()
+  let imageCount = 0
+  let imageBytes = 0
+  try {
+    for (const f of readdirSync(dir)) {
+      try {
+        const st = statSync(join(dir, f))
+        if (st.isFile()) {
+          imageCount += 1
+          imageBytes += st.size
+        }
+      } catch { /* ignore */ }
+    }
+  } catch { /* dir 可能不存在 */ }
+
+  let historyBytes = 0
+  try {
+    const st = statSync(indexPath())
+    if (st.isFile()) historyBytes = st.size
+  } catch { /* ignore */ }
+
+  const entries = readIndex()
+  let refCount = 0
+  let refBytes = 0
+  for (const e of entries) {
+    const refs = Array.isArray(e.refImages) ? e.refImages : []
+    for (const r of refs) {
+      refCount += 1
+      if (typeof r?.dataUrl === 'string') refBytes += approxDataUrlBytes(r.dataUrl)
+    }
+  }
+
+  return {
+    imageCount,
+    imageBytes,
+    historyCount: entries.length,
+    historyBytes,
+    refCount,
+    refBytes,
+    totalBytes: imageBytes + historyBytes,
+    userDataDir: userDataDir(),
+    imagesDir: dir,
+  }
+}
+
+// 只清生成图文件（images/*.png），历史条目保留（条目里的图会显示为缺失，由 UI 兜底）。
+export function clearGeneratedImages(): CacheStats {
+  const dir = imagesDir()
+  try {
+    for (const f of readdirSync(dir)) {
+      try { unlinkSync(join(dir, f)) } catch { /* ignore */ }
+    }
+  } catch { /* dir 可能不存在，没问题 */ }
+  return getCacheStats()
+}
+
+// 只剥离历史条目里的参考图快照（refImages 置空），生成图 + 历史索引都保留。
+// 这是 history.json 膨胀的主因：每张参考图快照约几百 KB ~ 数 MB。
+export function clearRefCache(): CacheStats {
+  const arr = readIndex()
+  let changed = false
+  for (const e of arr) {
+    if (Array.isArray(e.refImages) && e.refImages.length > 0) {
+      e.refImages = []
+      changed = true
+    }
+  }
+  if (changed) writeIndex(arr)
+  return getCacheStats()
+}
+
+// 全部清空：生成图 + 历史索引（含快照）。等价于老 clearHistory，但返回最新统计。
+export function clearAllCache(): CacheStats {
+  const dir = imagesDir()
+  try {
+    for (const f of readdirSync(dir)) {
+      try { unlinkSync(join(dir, f)) } catch { /* ignore */ }
+    }
+  } catch { /* dir 可能不存在，没问题 */ }
+  writeIndex([])
+  return getCacheStats()
+}
+
 // 弹原生保存框，把 userData/images/filename 拷一份到用户选的位置
 export async function downloadHistoryFile(filename: string): Promise<void> {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-  const src = join(imagesDir(), filename)
+  // 白名单 + startsWith 双校验：非法/穿越文件名直接拒绝，不读盘、不弹框。
+  const src = safeImagePath(filename)
+  if (!src) throw new Error('非法的文件名')
   if (!existsSync(src)) throw new Error('源文件不存在')
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const dot = filename.lastIndexOf('.')
   const ext = dot > 0 ? filename.slice(dot) : '.png'
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
@@ -99,12 +263,15 @@ export async function downloadHistoryFiles(filenames: string[]): Promise<void> {
   const dir = result.filePaths[0]
   if (!dir) return
 
-  // 收集 (src, dest, exists) 任务列表
+  // 收集 (src, dest, exists) 任务列表。逐个做白名单 + startsWith 校验，
+  // 任一带路径穿越/非法字符的名字直接跳过（不读盘、不写目标目录）。
   const tasks: Array<{ src: string; dest: string; exists: boolean }> = []
   for (const fn of filenames) {
-    const src = join(imagesDir(), fn)
-    if (!existsSync(src)) continue
-    const dest = join(dir, fn)
+    const src = safeImagePath(fn)
+    if (!src || !existsSync(src)) continue
+    const dest = join(dir, basename(fn))
+    // dest 也必须落在用户选的目录内
+    if (!resolve(dest).startsWith(resolve(dir) + sep)) continue
     tasks.push({ src, dest, exists: existsSync(dest) })
   }
   if (tasks.length === 0) return

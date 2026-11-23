@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>gpt-image studio · v0.2 UI 预览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;1,9..144,400;1,9..144,500&family=IBM+Plex+Mono:wght@400;500&display=swap" />
+<link rel="stylesheet" href="./src/renderer/styles/tokens.css" />
+<link rel="stylesheet" href="./src/renderer/styles/layout.css" />
+<link rel="stylesheet" href="./src/renderer/styles/controls.css" />
+<link rel="stylesheet" href="./src/renderer/styles/results.css" />
+<style>
+  body { background: #2b2926; user-select: auto; }
+  .preview-shell { min-height: 100vh; display: flex; flex-direction: column; }
+  .preview-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 14px 22px; background: #1a1815; color: #fbfaf6;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    position: sticky; top: 0; z-index: 500;
+  }
+  .preview-bar .t { font-family: var(--font-display); font-style: italic; font-size: 20px; }
+  .preview-bar .v { font-family: var(--font-mono); font-size: 10px; letter-spacing: .14em; opacity: .6; text-transform: uppercase; }
+  .preview-bar .sp { flex: 1; }
+  .preview-bar button.tgl {
+    appearance: none; border: 1px solid rgba(255,255,255,.25); background: transparent;
+    color: #fbfaf6; font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em;
+    padding: 7px 12px; border-radius: 6px; cursor: pointer;
+  }
+  .preview-bar button.tgl:hover { background: rgba(255,255,255,.12); }
+  .preview-bar button.tgl.is-on { background: #fbfaf6; color: #1a1815; border-color: #fbfaf6; }
+  .preview-note {
+    padding: 10px 22px; background: #23211e; color: rgba(251,250,246,.72);
+    font-size: 12px; line-height: 1.7;
+  }
+  .preview-note code { font-family: var(--font-mono); font-size: 11px; background: rgba(255,255,255,.1); padding: 1px 6px; border-radius: 4px; }
+  .app-frame {
+    margin: 22px auto; width: 1180px; max-width: calc(100vw - 44px);
+    background: var(--bg-page); border-radius: 14px; overflow: hidden;
+    box-shadow: 0 30px 90px rgba(0,0,0,.5);
+    border: 1px solid rgba(255,255,255,.12);
+  }
+  .feat-tag {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+    background: var(--accent); color: #fff;
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    vertical-align: 2px; margin-right: 6px;
+  }
+  .feat-tag.alt { background: var(--success); }
+  .feat-tag.warn { background: var(--warn); }
+  .feat-hint { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); letter-spacing: .04em; }
+  .mock-img {
+    width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-style: italic; font-size: 22px; color: rgba(26,24,21,.45);
+  }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 0 22px 26px; color: rgba(251,250,246,.8); font-size: 12px; }
+  .legend span b { font-family: var(--font-mono); }
+  .hidden { display: none !important; }
+  .demo-modal { position: fixed; inset: 0; z-index: 400; display: flex; align-items: center; justify-content: center;
+    background: rgba(20,18,15,.45); backdrop-filter: blur(20px); }
+  @media (max-width: 1200px) { .app-frame { width: 100%; margin: 12px; } }
+</style>
+</head>
+<body>
+<div class="preview-shell">
+  <div class="preview-bar">
+    <span class="t">gpt-image · studio</span>
+    <span class="v">v0.2 UI Preview · 5 项升级</span>
+    <span class="sp"></span>
+    <button class="tgl" id="btnLoading" onclick="toggleLoading()">切换：生成中 / 取消</button>
+    <button class="tgl" id="btnCache" onclick="toggleModal('cacheModal','btnCache')">缓存清理弹窗</button>
+    <button class="tgl" id="btnSettings" onclick="toggleModal('settingsModal','btnSettings')">设置·模型管理</button>
+    <button class="tgl" id="btnModelAdd" onclick="toggleModelAdd()">模型 + 添加行</button>
+  </div>
+  <div class="preview-note">
+    双击用浏览器打开本文件即可预览（<code>preview.html</code>）。① 取消生成：点左上切换按钮，看编辑器右下角 Generate → 取消生成；
+    ② 历史单条删除：把鼠标悬停到右侧 Archive 任意一行，右端出现 <code>×</code>；回填会恢复下方 Reference Plates；
+    ③ 模型区无下拉框：点 chip 直选，末尾 <code>+</code> 添加；点 chip 上的 <code>×</code> 出行内“确认删除”条（演示删除必有反馈）；
+    ④ README 已改为全量归档；⑤ Archive 头部 <code>Cache</code> 按钮点开看分项体积。
+    所有样式沿用 <code>tokens / controls / results / layout</code> 原设计语言。
+  </div>
+
+  <div class="app-frame">
+    <header class="drag-strip">
+      <div class="brand"><span>gpt-image</span><span class="mark">studio</span></div>
+      <button type="button" class="icon-btn" onclick="toggleModal('settingsModal','btnSettings')">Settings</button>
+    </header>
+    <div class="workbench">
+      <!-- ============ SIDEBAR ============ -->
+      <aside class="sidebar">
+        <div class="sidebar-section">
+          <div class="eyebrow">Issue № 01</div>
+          <!-- ③ ModelDisplay 新版 -->
+          <div class="model-block">
+            <div class="model-display">
+              <span class="model-name" id="modelName">gpt-image-2</span>
+              <span class="model-sub">model · 默认预设</span>
+            </div>
+            <div><span class="feat-tag">③</span><span class="feat-hint">模型预设直选 + 同样式“+”添加（无下拉框）</span></div>
+            <div class="model-chips" id="modelChips">
+              <span class="model-chip is-active"><button type="button" class="model-chip-name" onclick="pickModelChip(this)">gpt-image-2</button><button type="button" class="model-chip-x" onclick="requestDeleteChip(this)">×</button></span>
+              <span class="model-chip"><button type="button" class="model-chip-name" onclick="pickModelChip(this)">gpt-image-1</button><button type="button" class="model-chip-x" onclick="requestDeleteChip(this)">×</button></span>
+              <span class="model-chip"><button type="button" class="model-chip-name" onclick="pickModelChip(this)">dall-e-3</button><button type="button" class="model-chip-x" onclick="requestDeleteChip(this)">×</button></span>
+              <span class="model-chip"><button type="button" class="model-chip-name" onclick="pickModelChip(this)">dall-e-2</button><button type="button" class="model-chip-x" onclick="requestDeleteChip(this)">×</button></span>
+              <button type="button" class="model-chip is-add" onclick="toggleModelAdd()" title="手动添加模型">+</button>
+            </div>
+            <div class="model-confirm hidden" id="modelConfirmRow">
+              <span class="model-confirm-text">移除 <span class="name" id="modelConfirmName"></span>？</span>
+              <span class="model-confirm-actions">
+                <button type="button" class="pill danger" onclick="confirmDeleteChip()">确认删除</button>
+                <button type="button" class="pill" onclick="cancelDeleteChip()">取消</button>
+              </span>
+            </div>
+            <div class="model-add hidden" id="modelAddRow">
+              <input type="text" id="modelDraft" placeholder="例如：gpt-image-2-turbo" />
+              <div class="model-add-actions">
+                <button type="button" class="pill" onclick="toggleModelAdd()">取消</button>
+                <button type="button" class="pill" onclick="commitModel()">添加</button>
+              </div>
+            </div>
+          </div>
+          <div class="preset">
+            <select class="preset-select"><option>默认预设</option><option>主力中转站</option></select>
+            <div class="preset-price"><span class="amount">¥0.05</span><span class="unit">/ image</span></div>
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <div class="eyebrow">Format</div>
+          <div class="chip-grid" role="radiogroup" aria-label="比例">
+            <button type="button">21:9</button><button type="button">16:9</button>
+            <button type="button">3:2</button><button type="button">4:3</button>
+            <button type="button" class="is-active">1:1</button><button type="button">3:4</button>
+            <button type="button">2:3</button><button type="button">9:16</button>
+          </div>
+          <div class="field">
+            <span class="field-label">分辨率</span>
+            <div class="dual-segments">
+              <div class="segments"><button type="button" class="is-active">1K</button><button type="button">2K</button><button type="button">4K</button></div>
+              <span class="dual-segments-divider"></span>
+              <div class="segments"><button type="button">Low</button><button type="button" class="is-active">Med</button><button type="button">High</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <div class="eyebrow">Quantity</div>
+          <div class="field"><span class="field-label">张数</span>
+            <div class="chip-grid"><button type="button">1</button><button type="button" class="is-active">2</button><button type="button">3</button><button type="button">4</button></div>
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <div class="eyebrow">Reference Plates <span class="feat-tag alt">②</span></div>
+          <div class="feat-hint" style="margin-top:-4px">回填历史时自动恢复，无需重新上传</div>
+          <div class="plates">
+            <div class="plate-drop"><div class="plate-drop-text">拖入或点击 · JPG / PNG / WebP</div></div>
+            <div class="plate-grid" id="refGrid">
+              <div class="plate"><div class="mock-img" style="background:linear-gradient(135deg,#e8dfcf,#d8c9ae)">茶杯</div><span class="plate-idx">01</span><button type="button" class="plate-rm">×</button></div>
+              <div class="plate"><div class="mock-img" style="background:linear-gradient(135deg,#dfe4ea,#c3ccd8)">雾山</div><span class="plate-idx">02</span><button type="button" class="plate-rm">×</button></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- ============ MAIN ============ -->
+      <main class="main">
+        <section class="main-row-top">
+          <div class="editor-col">
+            <div class="eyebrow"><span>Composition</span><span class="feat-tag">①</span><span class="feat-hint">生成中按钮变“取消生成”</span></div>
+            <div class="ce-wrap"><div class="ce-stage">
+              <div class="ce-editor" style="padding:16px 18px;color:var(--text-1);font-family:var(--font-display);font-size:16px;line-height:1.55;">
+                晨雾中的白瓷茶杯，<span class="mention">@图1</span> 的釉面质感，<span class="mention">@图2</span> 的远山氛围，柔和侧光，商业摄影质感。
+              </div>
+              <div class="ce-action">
+                <button type="button" class="generate-btn" id="genBtn" onclick="toggleLoading()">
+                  <span class="glyph">↳</span><span id="genLabel">Generate</span>
+                </button>
+              </div>
+            </div></div>
+          </div>
+          <div class="templates-col">
+            <div class="eyebrow"><span>Presets</span><span style="margin-left:auto;color:var(--text-3)">5</span></div>
+            <div class="toc">
+              <button type="button" class="toc-item"><span class="toc-num">01</span><span class="toc-text"><span class="toc-label">电商</span><span class="toc-en">E-commerce</span></span></button>
+              <button type="button" class="toc-item"><span class="toc-num">02</span><span class="toc-text"><span class="toc-label">摄影</span><span class="toc-en">Photography</span></span></button>
+              <button type="button" class="toc-item"><span class="toc-num">03</span><span class="toc-text"><span class="toc-label">海报</span><span class="toc-en">Poster Design</span></span></button>
+              <button type="button" class="toc-item"><span class="toc-num">04</span><span class="toc-text"><span class="toc-label">创意</span><span class="toc-en">Creative Art</span></span></button>
+              <button type="button" class="toc-item"><span class="toc-num">05</span><span class="toc-text"><span class="toc-label">艺术</span><span class="toc-en">Fine Art</span></span></button>
+            </div>
+          </div>
+        </section>
+        <section class="main-row-bottom">
+          <div class="print-col">
+            <div class="eyebrow"><span>Output</span></div>
+            <div class="print"><div class="print-frame" style="width:400px;height:400px;position:relative;">
+              <div class="gallery">
+                <button type="button" class="gallery-cell"><div class="mock-img" style="background:linear-gradient(135deg,#f2ede1,#ddd2b8)">plate 01</div><span class="gallery-idx">01</span></button>
+                <button type="button" class="gallery-cell"><div class="mock-img" style="background:linear-gradient(135deg,#e3e9f2,#c6cfe0)">plate 02</div><span class="gallery-idx">02</span></button>
+              </div>
+              <div class="print-index">Print № <strong>0001</strong></div>
+              <button type="button" class="print-save">↓ Save ×2</button>
+            </div></div>
+          </div>
+          <div class="archive-col">
+            <div class="archive">
+              <div class="archive-head">
+                <div class="archive-eyebrow">Archive <span class="count">· 003</span></div>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <span class="feat-tag warn">⑤</span>
+                  <button type="button" class="pill" onclick="toggleModal('cacheModal','btnCache')">Cache</button>
+                  <button type="button" class="pill danger">Clear</button>
+                </div>
+              </div>
+              <div class="feat-hint" style="padding:2px 4px 6px">⑥ 上下对齐 · archive-list 拉伸至与 print-frame 同高（内部滚动）</div>
+              <div class="archive-list" style="width:400px;">
+                <div class="archive-item" onclick="refillDemo(this)">
+                  <div class="idx">№<br /><span class="n">0003</span></div>
+                  <div class="ts">2026.09.10 10:24<span class="preset">默认预设</span></div>
+                  <div class="body"><div class="prompt">晨雾中的白瓷茶杯，釉面质感…</div><div class="params">1:1 · 1K · ×2 · 2 plates · 2 ref</div></div>
+                  <button type="button" class="archive-del" title="删除这条历史" onclick="event.stopPropagation();this.closest('.archive-item').remove();">×</button>
+                </div>
+                <div class="archive-item" onclick="refillDemo(this)">
+                  <div class="idx">№<br /><span class="n">0002</span></div>
+                  <div class="ts">2026.09.09 21:07<span class="preset">主力中转站</span></div>
+                  <div class="body"><div class="prompt">霓虹雨夜的赛博茶馆，倒影…</div><div class="params">16:9 · 2K · ×1 · 1 plate</div></div>
+                  <button type="button" class="archive-del" title="删除这条历史" onclick="event.stopPropagation();this.closest('.archive-item').remove();">×</button>
+                </div>
+                <div class="archive-item" onclick="refillDemo(this)">
+                  <div class="idx">№<br /><span class="n">0001</span></div>
+                  <div class="ts">2026.09.08 15:52<span class="preset">默认预设</span></div>
+                  <div class="body"><div class="prompt">莫兰迪色系静物，伦勃朗布光…</div><div class="params">3:4 · 1K · ×4 · 4 plates · 1 ref</div></div>
+                  <button type="button" class="archive-del" title="删除这条历史" onclick="event.stopPropagation();this.closest('.archive-item').remove();">×</button>
+                </div>
+                <div id="refillTip" class="hidden" style="padding:10px 18px;font-size:12px;color:var(--success);border-top:1px solid var(--rule);">
+                  ✓ 已回填：提示词 + 比例/分辨率/张数 + 参考图快照（左侧 Reference Plates 恢复 2 张）
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><b>①</b> 取消生成 — Generate ↔ 取消生成同位切换，中止请求、过期回包丢弃</span>
+    <span><b>②</b> 单条删除 ×（hover浮现）+ 回填恢复参考图快照</span>
+    <span><b>③</b> 模型预设直选 chips + 末尾同样式“+”添加；删除两步确认（× → 确认删除），至少保留一个</span>
+    <span><b>④</b> 全量归档（README 不再写“最近5次”）</span>
+    <span><b>⑤</b> Cache 弹窗：生成图 / 参考图快照 / 历史索引分项体积 + 针对性清理</span>
+  </div>
+</div>
+
+<!-- ⑤ CacheModal 预览 -->
+<div class="demo-modal hidden" id="cacheModal" onclick="if(event.target===this)toggleModal('cacheModal','btnCache')">
+  <div style="width:460px;max-height:85vh;overflow:auto;background:var(--bg-card);border-radius:var(--r-md);border:1px solid var(--line-strong);box-shadow:var(--shadow-pop);padding:28px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px;">
+      <h2 style="margin:0;font-family:var(--font-display);font-style:italic;font-size:26px;font-weight:500;">Cache</h2>
+      <span style="font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);">Total 48.6 MB</span>
+    </div>
+    <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin-bottom:16px;">Storage · 清理缓存</div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg-input);display:flex;align-items:center;gap:10px;">
+        <div style="flex:1;"><div style="display:flex;gap:8px;align-items:baseline;"><span style="font-family:var(--font-display);font-style:italic;font-size:15px;">生成图</span><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);">Generated plates</span></div>
+        <div style="font-size:12px;color:var(--text-2);margin-top:2px;">12 张 · 42.3 MB</div></div>
+        <button type="button" class="pill">清理</button>
+      </div>
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg-input);display:flex;align-items:center;gap:10px;">
+        <div style="flex:1;"><div style="display:flex;gap:8px;align-items:baseline;"><span style="font-family:var(--font-display);font-style:italic;font-size:15px;">参考图快照</span><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);">Reference snapshots</span></div>
+        <div style="font-size:12px;color:var(--text-2);margin-top:2px;">5 张 · 约 5.1 MB</div></div>
+        <button type="button" class="pill">清理</button>
+      </div>
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg-input);display:flex;align-items:center;gap:10px;opacity:.75;">
+        <div style="flex:1;"><div style="display:flex;gap:8px;align-items:baseline;"><span style="font-family:var(--font-display);font-style:italic;font-size:15px;">历史索引</span><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);">History index</span></div>
+        <div style="font-size:12px;color:var(--text-2);margin-top:2px;">3 条 · 6.2 MB（含快照）</div></div>
+        <button type="button" class="pill" disabled style="opacity:.4;">随全部清空</button>
+      </div>
+    </div>
+    <div style="margin-top:12px;padding:10px;border-radius:var(--r-sm);background:var(--bg-page);border:1px solid var(--line);font-size:12px;color:var(--text-2);line-height:1.6;">
+      「全部清空」会删除生成图 + 历史记录 + 快照，等价于 Archive 的 Clear。只想瘦身不清记录时，用上面两项针对性清理。
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:20px;">
+      <button type="button" class="pill danger">全部清空</button>
+      <button type="button" class="pill" onclick="toggleModal('cacheModal','btnCache')">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings · 模型管理预览 -->
+<div class="demo-modal hidden" id="settingsModal" onclick="if(event.target===this)toggleModal('settingsModal','btnSettings')">
+  <div style="width:580px;max-height:85vh;overflow:auto;background:var(--bg-card);border-radius:var(--r-md);border:1px solid var(--line-strong);box-shadow:var(--shadow-pop);padding:28px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:20px;">
+      <h2 style="margin:0;font-family:var(--font-display);font-style:italic;font-size:28px;font-weight:500;">Presets &amp; Settings</h2>
+      <button type="button" class="pill">+ Add</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg-input);display:flex;align-items:center;gap:10px;">
+        <div style="flex:1;"><div style="font-weight:600;font-size:14px;">默认预设 <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(52,199,89,.18);color:#1A7F37;">当前激活</span></div>
+        <div style="font-size:12px;color:var(--text-3);">https://api.example.com · gpt-image-2</div></div>
+        <button type="button" class="pill">编辑</button>
+      </div>
+    </div>
+    <div style="margin-top:20px;border-top:1px solid var(--rule);padding-top:16px;">
+      <div class="field-label" style="margin-bottom:8px;">全局模型列表 · Models <span class="feat-tag">③</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;" id="settingsModels">
+        <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 4px 3px 10px;font-family:var(--font-mono);font-size:11px;">gpt-image-2</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 4px 3px 10px;font-family:var(--font-mono);font-size:11px;">gpt-image-1 <button type="button" class="pill" style="padding:1px 8px;">×</button></span>
+        <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 4px 3px 10px;font-family:var(--font-mono);font-size:11px;">dall-e-3 <button type="button" class="pill" style="padding:1px 8px;">×</button></span>
+        <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 4px 3px 10px;font-family:var(--font-mono);font-size:11px;">dall-e-2 <button type="button" class="pill" style="padding:1px 8px;">×</button></span>
+      </div>
+      <div style="display:flex;gap:8px;"><input type="text" placeholder="新增模型，例如 gpt-image-2-turbo" style="flex:1;" /><button type="button" class="pill">+ 添加</button></div>
+      <div class="field" style="margin-top:12px;"><label class="field-label">预设模型（跟随本预设 · chips 直选 + 可手输）</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <span class="model-chip is-active"><button type="button" class="model-chip-name">gpt-image-2</button></span>
+          <span class="model-chip"><button type="button" class="model-chip-name">gpt-image-1</button></span>
+          <span class="model-chip"><button type="button" class="model-chip-name">dall-e-3</button></span>
+        </div>
+        <input type="text" value="gpt-image-2" style="margin-top:6px;" />
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:20px;"><button type="button" class="pill" onclick="toggleModal('settingsModal','btnSettings')">完成</button></div>
+  </div>
+</div>
+
+<script>
+  let loading = false;
+  function toggleLoading() {
+    loading = !loading;
+    const btn = document.getElementById('genBtn');
+    const label = document.getElementById('genLabel');
+    const top = document.getElementById('btnLoading');
+    if (loading) {
+      btn.classList.add('is-cancel');
+      btn.querySelector('.glyph').textContent = '×';
+      label.textContent = '取消生成';
+      top.classList.add('is-on');
+    } else {
+      btn.classList.remove('is-cancel');
+      btn.querySelector('.glyph').textContent = '↳';
+      label.textContent = 'Generate';
+      top.classList.remove('is-on');
+    }
+  }
+  function toggleModal(id, btnId) {
+    const m = document.getElementById(id);
+    const b = btnId && document.getElementById(btnId);
+    const willOpen = m.classList.contains('hidden');
+    m.classList.toggle('hidden');
+    if (b) b.classList.toggle('is-on', willOpen);
+  }
+  function toggleModelAdd() {
+    const row = document.getElementById('modelAddRow');
+    const b = document.getElementById('btnModelAdd');
+    row.classList.toggle('hidden');
+    if (b) b.classList.toggle('is-on', !row.classList.contains('hidden'));
+    const input = document.getElementById('modelDraft');
+    if (!row.classList.contains('hidden')) input.focus();
+  }
+  function pickModel(v) {
+    document.getElementById('modelName').textContent = v;
+    document.querySelectorAll('#modelChips .model-chip').forEach(c => {
+      const nameBtn = c.querySelector('.model-chip-name');
+      c.classList.toggle('is-active', !!nameBtn && nameBtn.textContent === v);
+    });
+  }
+  function pickModelChip(btn) { pickModel(btn.textContent); }
+  // 删除改为两步确认（第一步只高亮 + 出确认条，必须点“确认删除”才真正移除），
+  // 演示真机修复后的行为：× 常显、点击必有反馈。
+  let pendingChip = null;
+  function requestDeleteChip(xBtn) {
+    const chip = xBtn.closest('.model-chip');
+    const name = chip.querySelector('.model-chip-name').textContent;
+    if (pendingChip === chip) { cancelDeleteChip(); return; }
+    cancelDeleteChip();
+    pendingChip = chip;
+    chip.classList.add('is-confirm');
+    document.getElementById('modelConfirmName').textContent = '「' + name + '」';
+    document.getElementById('modelConfirmRow').classList.remove('hidden');
+  }
+  function cancelDeleteChip() {
+    pendingChip = null;
+    document.querySelectorAll('#modelChips .model-chip.is-confirm').forEach(c => c.classList.remove('is-confirm'));
+    document.getElementById('modelConfirmRow').classList.add('hidden');
+  }
+  function confirmDeleteChip() {
+    if (!pendingChip) return;
+    const chips = [...document.querySelectorAll('#modelChips .model-chip')].filter(c => !c.classList.contains('is-add'));
+    if (chips.length <= 1) { alert('至少需要保留一个模型'); return; }
+    const wasActive = pendingChip.classList.contains('is-active');
+    pendingChip.remove();
+    pendingChip = null;
+    document.getElementById('modelConfirmRow').classList.add('hidden');
+    if (wasActive) {
+      const first = document.querySelector('#modelChips .model-chip:not(.is-add) .model-chip-name');
+      if (first) pickModel(first.textContent);
+    }
+  }
+  function commitModel() {
+    const v = document.getElementById('modelDraft').value.trim();
+    if (!v) return;
+    cancelDeleteChip();
+    pickModel(v);
+    const chips = document.getElementById('modelChips');
+    const addBtn = chips.querySelector('.is-add');
+    const exists = [...chips.querySelectorAll('.model-chip-name')].some(b => b.textContent === v);
+    if (!exists) {
+      const s = document.createElement('span'); s.className = 'model-chip is-active';
+      s.innerHTML = '<button type="button" class="model-chip-name" onclick="pickModelChip(this)"></button><button type="button" class="model-chip-x" onclick="requestDeleteChip(this)">×</button>';
+      s.querySelector('.model-chip-name').textContent = v;
+      chips.insertBefore(s, addBtn);
+    }
+    chips.querySelectorAll('.model-chip').forEach(c => { if (!c.classList.contains('is-add')) c.classList.remove('is-active'); });
+    const target = [...chips.querySelectorAll('.model-chip')].find(c => { const b = c.querySelector('.model-chip-name'); return b && b.textContent === v; });
+    if (target) target.classList.add('is-active');
+    document.getElementById('modelDraft').value = '';
+    document.getElementById('modelAddRow').classList.add('hidden');
+    document.getElementById('btnModelAdd').classList.remove('is-on');
+  }
+  function refillDemo(row) {
+    document.getElementById('refillTip').classList.remove('hidden');
+    document.querySelectorAll('.archive-item').forEach(r => r.style.background = '');
+    row.style.background = 'var(--bg-hover)';
+    document.getElementById('refGrid').style.outline = '2px solid var(--success)';
+    setTimeout(() => document.getElementById('refGrid').style.outline = '', 1200);
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      document.getElementById('cacheModal').classList.add('hidden');
+      document.getElementById('settingsModal').classList.add('hidden');
+      document.getElementById('btnCache').classList.remove('is-on');
+      document.getElementById('btnSettings').classList.remove('is-on');
+    }
+  });
+</script>
+</body>
+</html>

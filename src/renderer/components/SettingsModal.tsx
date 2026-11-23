@@ -17,7 +17,40 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { state, reloadSettings } = useComposer()
   const presets = state.settings.presets
   const activeId = state.settings.activePresetId
+  const models = state.settings.models ?? []
   const [editing, setEditing] = useState<Preset | Omit<Preset, 'id'> | null>(null)
+  const [newModel, setNewModel] = useState('')
+  const [modelError, setModelError] = useState<string | null>(null)
+  const [modelPending, setModelPending] = useState<string | null>(null)
+
+  const addModelEntry = async (name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setModelError(null)
+    try {
+      await window.api.addModel(trimmed)
+      setNewModel('')
+      await reloadSettings()
+    } catch (e) {
+      setModelError(e instanceof Error ? e.message : '添加模型失败')
+    }
+  }
+
+  const removeModelEntry = async (name: string) => {
+    if (models.length <= 1) {
+      setModelError('至少需要保留一个模型')
+      setModelPending(null)
+      return
+    }
+    setModelError(null)
+    try {
+      await window.api.deleteModel(name)
+      setModelPending(null)
+      await reloadSettings()
+    } catch (e) {
+      setModelError(e instanceof Error ? e.message : '删除模型失败')
+    }
+  }
 
   const saveEdit = async (p: Preset | Omit<Preset, 'id'>) => {
     if ('id' in p && p.id) {
@@ -79,6 +112,68 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <button type="button" className="pill" onClick={onClose}>完成</button>
         </div>
 
+        <div style={{ marginTop: 20, borderTop: '1px solid var(--rule)', paddingTop: 16 }}>
+          <div className="field-label" style={{ marginBottom: 8 }}>全局模型列表 · Models</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+            {models.map((m) => (
+              <span key={m} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                border: modelPending === m ? '1px solid var(--danger)' : '1px solid var(--line)',
+                background: modelPending === m ? 'var(--danger-soft)' : 'transparent',
+                borderRadius: 999,
+                padding: '3px 4px 3px 10px',
+                fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-1)',
+              }}>
+                {m}
+                {models.length > 1 && (
+                  <button type="button" className="pill" style={{ padding: '1px 8px' }}
+                    title={modelPending === m ? '再点一次取消' : `移除 ${m}`}
+                    onClick={() => {
+                      if (modelPending === m) setModelPending(null)
+                      else { setModelError(null); setModelPending(m) }
+                    }}
+                  >×</button>
+                )}
+              </span>
+            ))}
+          </div>
+          {modelPending && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+              border: '1px solid rgba(184, 36, 45, 0.4)', background: 'var(--danger-soft)',
+              borderRadius: 'var(--r-sm)', padding: '6px 8px', marginBottom: 10,
+              fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--danger)',
+            }}>
+              <span>移除「{modelPending}」？</span>
+              <span style={{ display: 'flex', gap: 4 }}>
+                <button type="button" className="pill danger" style={{ padding: '3px 8px' }}
+                  onClick={() => void removeModelEntry(modelPending)}>确认删除</button>
+                <button type="button" className="pill" style={{ padding: '3px 8px' }}
+                  onClick={() => setModelPending(null)}>取消</button>
+              </span>
+            </div>
+          )}
+          {modelError && (
+            <div style={{
+              fontFamily: 'var(--font-mono)', fontSize: 10,
+              color: 'var(--danger)', marginBottom: 10,
+            }}>{modelError}</div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input type="text" value={newModel}
+              onChange={(e) => setNewModel(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newModel.trim()) void addModelEntry(newModel)
+              }}
+              placeholder="新增模型，例如 gpt-image-2-turbo"
+              style={{ flex: 1 }} />
+            <button type="button" className="pill"
+              disabled={!newModel.trim()}
+              onClick={() => void addModelEntry(newModel)}
+            >+ 添加</button>
+          </div>
+        </div>
+
         {editing && (
           <PresetEditor
             draft={editing}
@@ -138,6 +233,8 @@ function PresetEditor({
   onCancel: () => void
   onSave: (p: Preset | Omit<Preset, 'id'>) => void
 }) {
+  const { state } = useComposer()
+  const models = state.settings.models ?? []
   const [local, setLocal] = useState(draft)
   const [reveal, setReveal] = useState(false)
 
@@ -193,9 +290,21 @@ function PresetEditor({
               onChange={(e) => setLocal({ ...local, pricePerImage: Number(e.target.value) || 0 })} />
           </div>
           <div className="field" style={{ flex: 1 }}>
-            <label className="field-label">模型</label>
+            <label className="field-label">模型（跟随本预设 · 点选或手输）</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {models.map((m) => (
+                <span key={m}
+                  className={`model-chip ${local.model === m ? 'is-active' : ''}`}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setLocal({ ...local, model: m })}>
+                  <span className="model-chip-name" style={{ cursor: 'pointer' }}>{m}</span>
+                </span>
+              ))}
+            </div>
             <input type="text" value={local.model}
-              onChange={(e) => setLocal({ ...local, model: e.target.value })} />
+              onChange={(e) => setLocal({ ...local, model: e.target.value })}
+              placeholder="也可直接输入自定义模型名"
+              style={{ marginTop: 6 }} />
           </div>
         </div>
 

@@ -7,18 +7,65 @@ body,
   background: transparent;
 }
 
-body {
-  font-family: var(--font-body);
-  font-size: var(--body-size);
-  color: var(--text-1);
-  -webkit-font-smoothing: antialiased;
-  user-select: none;
-  letter-spacing: 0.005em;
+/* 比例缩放：当窗口宽度变化时，通过 --scale-factor 变量统一缩放所有元素。
+   通过 meta viewport + JS 动态计算，确保布局、字体、卡片等所有元素等比例缩放。
+   当窗口宽度在 640px-2560px 之间时，scale factor 线性映射为 0.8-1.6。
+   低于 640px 时强制 0.8（最小），高于 2560px 强制 1.6（最大）。 */
+:root {
+  --scale-factor: 1;
+}
+
+/* 强制所有继承了 body 字体大小的元素 respect 缩放因子 —— 通过 css 变量实现等比例 */
+body *,
+body *::before,
+body *::after {
+  box-sizing: border-box;
+}
+
+/* 当窗口大小变化时，通过 CSS variable 触发重新计算 */
+@media (pointer: fine) {
+  @supports ((--scale-factor: 1)) {
+    html {
+      --scale-factor: calc(
+        min(
+          1.6,
+          max(
+            0.8,
+            0.8 + (100vw - 640px) * 0.8 / 1920
+          )
+        )
+      );
+    }
+  }
 }
 
 #root {
   display: flex;
   flex-direction: column;
+  --scale-factor: calc(
+    min(
+      1.6,
+      max(
+        0.8,
+        0.8 + (100vw - 640px) * 0.8 / 1920
+      )
+    )
+  );
+}
+
+/* 确保输出/print column 在窗口缩放时保持位置稳定，防止位移 */
+.print-col {
+  flex: 0 0 auto;
+  width: calc(100% / 2 * var(--scale-factor));
+  min-width: 300px;
+  max-width: 500px;
+  box-sizing: border-box;
+}
+
+.archive-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 /* Drag strip for hiddenInset — keep transparent to let vibrancy show */
@@ -156,10 +203,11 @@ body {
 }
 
 /* Sidebar section grouping */
+/* P1-6左栏等隙对齐左线：gap统一12px，不改配色/字体 */
 .sidebar-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   padding-bottom: 18px;
   border-bottom: 1px solid var(--rule);
   position: relative;
@@ -175,7 +223,9 @@ body {
    so the prompt box's bottom edge lines up with the TOC's bottom edge. */
 .main-row-top {
   display: grid;
-  grid-template-columns: 1fr 180px;
+  /* 流式自适应：编辑器吃掉所有剩余宽度，右列在 170~210px 间浮动。
+     窗口拉大时两列一起变宽，不再留空；字体字号保持不变。 */
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 210px);
   gap: 16px;
   align-items: stretch;
   flex: 0 0 auto;
@@ -183,12 +233,15 @@ body {
 
 .main-row-bottom {
   display: grid;
-  grid-template-columns: 400px 400px;
+  /* 流式自适应：两列等分剩余宽度（不再是写死的 400px+400px + 左对齐留空）。
+     高度由 flex: 1 吃掉窗口剩余纵空间：Output 正方形边长取
+     min(列宽, 行高)（PreviewBox 用 ResizeObserver 实测），
+     Archive 列表 flex:1 + 内部滚动，保证两区顶部永远对齐。 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
   align-items: stretch;
   flex: 1 1 auto;
   min-height: 0;
-  justify-content: start;
 }
 
 .editor-col {
@@ -206,12 +259,18 @@ body {
 }
 
 /* ---------- Print + Archive columns ----------
-   Both columns share identical structure: a header row + a 400×400 box.
-   To make the bottom edges line up to the pixel, the 400×400 box is the
-   LAST item in each column and is stretched to the bottom of the column
-   (the column itself stretches to fill the row via `align-items: stretch`
-   on .main-row-bottom above). The header sits at the top with its own
-   intrinsic height. */
+   Both columns share identical structure: a header row + a stretched box.
+   流式自适应（窗口任意缩放都不乱）：
+     - print-frame 不再是写死的 400×400：边长由 PreviewBox 实测
+       列宽×行高后取 min，保证永远是“当前空间里最大的正方形”，
+       顶部永远和 Archive 列表顶部对齐。
+     - archive-list flex:1 吃掉列内剩余高度 + 内部滚动，
+       历史再长也不把底边撑下去。
+   Mechanics: .main-row-bottom is a grid with `align-items: stretch`, so both
+   columns are already row-height tall. Each column is a flex column where the
+   header takes its intrinsic height and the box takes the rest (`flex: 1`
+   + `min-height: 0`). archive-list additionally scrolls internally
+   (`overflow: auto`) so long histories never push the bottom edge down. */
 .print-col {
   display: flex;
   flex-direction: column;
@@ -228,11 +287,57 @@ body {
 }
 .print-col .print,
 .archive-col .archive {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
 }
-.print-col .print-frame,
-.archive-col .archive-list {
-  margin-top: auto;          /* push the box to the bottom of the column */
+/* Headers pin to the top … */
+.print-col > .eyebrow,
+.archive-col .archive-head {
   flex: 0 0 auto;
+}
+/* … and the boxes share the remaining space, so both tops line up.
+   print-frame 本体尺寸由 PreviewBox 按实测空间设定（正方形），
+   这里只负责把它推到底边、和 Archive 同顶。 */
+.print-col .print-frame {
+  margin-top: auto;          /* print column: box hugs the bottom … */
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+.archive-col .archive-list {
+  margin-top: 0;
+  flex: 1 1 auto;            /* archive column: box stretches … */
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Bottom-row header equality: Output (.eyebrow) and Archive (.archive-head)
+   must be exactly the same height, otherwise the two 400px boxes below them
+   start at different Y and the tops never line up. The pill buttons
+   (Cache / Clear, ~26px tall) are the tallest header content, so both
+   headers are fixed to 28px — independent of button presence, so the empty
+   state (Cache only) aligns exactly like the filled state (Cache + Clear). */
+.print-col > .eyebrow,
+.archive-col .archive-head {
+  height: 28px;
+  min-height: 28px;
+  box-sizing: border-box;
+}
+.print-col > .eyebrow {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.archive-col .archive-head {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+/* body 默认 user-select:none 防整窗误选，但输入框/可编辑区必须放开，
+   否则用户无法选中、复制、拖选 prompt 或 API Key（P0 体验缺陷）。 */
+input,
+textarea,
+[contenteditable],
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
 }

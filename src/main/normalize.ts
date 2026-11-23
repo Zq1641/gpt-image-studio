@@ -29,20 +29,57 @@ function imagesDir(): string {
   return d
 }
 
+// URL 回包下载：60s 超时 + 50MB 体积上限。
+// 之前是裸 net.request：中转站返回超大/假死 URL 会一直挂着不回来，
+// 内存里攒 Buffer 也可能把主进程撑爆。超限直接报 io 错，不写盘、不进历史。
+const URL_DOWNLOAD_TIMEOUT_MS = 60_000
+const URL_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
+
 async function downloadIfUrl(url: string): Promise<{ data: Buffer; mime: string } | { ok: false }> {
   try {
     const { net } = await import('electron')
     return await new Promise((resolve) => {
+      let settled = false
+      const done = (v: { data: Buffer; mime: string } | { ok: false }) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(v)
+      }
+      const timer = setTimeout(() => {
+        try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+        done({ ok: false })
+      }, URL_DOWNLOAD_TIMEOUT_MS)
       const req = net.request({ url, method: 'GET' })
       const chunks: Buffer[] = []
+      let received = 0
       let mime = 'image/png'
       req.on('response', (resp) => {
+        // Content-Length 先验：超限直接掐掉，连 body 都不收
+        const cl = resp.headers['content-length']
+        const declared = Array.isArray(cl) ? cl[0] : cl
+        if (typeof declared === 'string' && /^\d+$/.test(declared.trim())) {
+          if (Number(declared) > URL_DOWNLOAD_MAX_BYTES) {
+            try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+            done({ ok: false })
+            return
+          }
+        }
         const ct = resp.headers['content-type']
         if (typeof ct === 'string') mime = ct.split(';')[0] || mime
-        resp.on('data', (c) => chunks.push(c))
-        resp.on('end', () => resolve({ data: Buffer.concat(chunks), mime }))
+        resp.on('data', (c) => {
+          received += (c as Buffer).length
+          if (received > URL_DOWNLOAD_MAX_BYTES) {
+            try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+            done({ ok: false })
+            return
+          }
+          chunks.push(c as Buffer)
+        })
+        resp.on('end', () => done({ data: Buffer.concat(chunks), mime }))
+        resp.on('error', () => done({ ok: false } as never))
       })
-      req.on('error', () => resolve({ ok: false } as never))
+      req.on('error', () => done({ ok: false } as never))
       req.end()
     })
   } catch {
@@ -77,6 +114,10 @@ export async function normalizeResponse(req: GenerateRequest, raw: unknown): Pro
     params: req.params,
     size: sizeString(req.params.aspect, req.params.resolution, 'computed'),
     refImageFiles: [],
+    // 参考图快照随历史持久化，回填时可直接恢复（老条目没有则为空）。
+    // 注意体积：快照是 JPEG dataUrl，history.json 会随条目线性变大，
+    // 瘦身请用 Cache 弹窗的“参考图快照”清理（只剥快照、不动历史）。
+    refImages: Array.isArray(req.refImages) ? req.refImages : [],
     images: [],
   }
 
@@ -91,10 +132,11 @@ export async function normalizeResponse(req: GenerateRequest, raw: unknown): Pro
         const bytes = Buffer.from(img.data, 'base64')
         writeFileSync(join(dir, name), bytes)
         saved.push({ file: name, url: `img://${name}`, mime: 'image/png', bytes: bytes.length })
+        console.log('[localFile] saved', name, bytes.length + 'B', `img://${name}`);
       } else {
         const got = await downloadIfUrl(img.url)
         if ('ok' in got) {
-          return { ok: false, code: 'io', message: '下载生成图片失败' }
+          return { ok: false, code: 'io', message: '下载生成图片失败（超时或文件过大，限 60s / 50MB）' }
         }
         writeFileSync(join(dir, name), got.data)
         saved.push({ file: name, url: `img://${name}`, mime: 'image/png', bytes: got.data.length })
@@ -105,6 +147,8 @@ export async function normalizeResponse(req: GenerateRequest, raw: unknown): Pro
   }
 
   entry.images = saved.map((s) => ({ file: s.file, url: s.url }))
+  console.log('[job] job_id=', req.requestId, 'saved', saved.length + '/' + images.length, 'size=', req.params.aspect, req.params.resolution);
+  console.log('[file] protocol img:// files=', saved.map((s) => s.file).slice(0, 4).join(','));
   return { ok: true, entry }
 }
 

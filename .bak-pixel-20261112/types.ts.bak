@@ -1,0 +1,151 @@
+// Single source of truth for all data shapes crossing the process boundary.
+
+export type AspectRatio = '21:9' | '16:9' | '3:2' | '4:3' | '1:1' | '3:4' | '2:3' | '9:16'
+export type Resolution = '1K' | '2K' | '4K'
+export type Quality    = 'low' | 'medium' | 'high'
+export type Count = 1 | 2 | 3 | 4
+export type ImageFieldName = 'image' | 'images' | 'image_url'
+export type SizeMode = 'computed' | 'square' | 'omit'
+
+export interface Preset {
+  id: string
+  name: string                            // 显示名，例如 "主力中转 / ClaudeCode 站"
+  baseUrl: string
+  apiKey: string
+  pricePerImage: number                   // 元/张；用户手动填，可为 0
+  // 模型 + 字段名 + 尺寸模式也跟随预设走；同一用户可能用不同预设调不同模型
+  model: string
+  imageFieldName: ImageFieldName
+  sizeMode: SizeMode
+  sendAspectRatio: boolean
+}
+
+export interface AppSettings {
+  presets: Preset[]                       // 至少 1 条
+  activePresetId: string                  // 等于 presets 中某条 id
+  // 兼容旧版：保留 model 默认值；新 UI 已经搬到 preset 上
+  defaultModel: string
+  timeoutMs: number
+  models: string[]                        // 全局可用模型列表（ModelDisplay 下拉用）
+  skills: Skill[]                         // 用户上传的 skill（右上角 Skills 区展示）
+}
+
+// 用户上传的 skill：Markdown / Txt 纯文本。全文存盘持久化，
+// 输入框里只 render 一个红色名称胶囊，生成时后台把全文拼入提示词。
+export interface Skill {
+  id: string
+  name: string                            // 胶囊上显示的名字（token 标识，全局唯一）
+  content: string                         // 全文（生成时拼入）
+  sourceName: string                      // 上传时的原始文件名
+  charCount: number
+  createdAt: number
+}
+
+export const DEFAULT_MODELS: string[] = ['gpt-image-2', 'gpt-image-1', 'dall-e-3', 'dall-e-2']
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  presets: [
+    {
+      id: 'default',
+      name: '默认预设',
+      baseUrl: '',
+      apiKey: '',
+      pricePerImage: 0,
+      model: 'gpt-image-2',
+      imageFieldName: 'image',
+      sizeMode: 'computed',
+      sendAspectRatio: true,
+    },
+  ],
+  activePresetId: 'default',
+  defaultModel: 'gpt-image-2',
+  timeoutMs: 600_000,
+  models: [...DEFAULT_MODELS],
+  skills: [],
+}
+
+export interface RefImage {
+  id: string
+  index: number
+  name: string
+  mime: 'image/jpeg' | 'image/png' | 'image/webp'
+  dataUrl: string
+  width: number
+  height: number
+  bytes: number
+}
+
+// 历史里持久化的参考图快照（dataUrl 可能很大，但为了回填必须保留）。
+// 回填时直接恢复为 RefImage，无需用户重新上传。
+export type ArchivedRefImage = RefImage
+
+export interface GenerateParams {
+  aspect: AspectRatio
+  resolution: Resolution
+  quality: Quality
+  count: Count
+}
+
+export interface GenerateRequest {
+  requestId: string
+  promptRaw: string
+  promptResolved: string
+  params: GenerateParams
+  images: string[]
+  // 参考图快照（renderer 传来的 RefImage 元数据 + dataUrl），main 落盘历史时直接存。
+  refImages?: ArchivedRefImage[]
+}
+
+export interface CacheStats {
+  imageCount: number            // images/ 下生成图文件数
+  imageBytes: number            // 生成图总字节
+  historyCount: number          // 历史条目数
+  historyBytes: number          // history.json 文件体积
+  refCount: number              // 历史内嵌参考图快照总数
+  refBytes: number              // 参考图快照 dataUrl 估算体积
+  totalBytes: number            // imageBytes + historyBytes（含内嵌快照）
+  userDataDir: string
+  imagesDir: string
+}
+
+export interface GeneratedImage {
+  file: string
+  url: string
+  width?: number
+  height?: number
+}
+
+export interface HistoryEntry {
+  id: string
+  createdAt: number
+  presetName: string                      // 用哪个预设出的（历史展示用）
+  model: string
+  promptRaw: string
+  promptResolved: string
+  params: GenerateParams
+  size: string
+  refImageFiles: string[]
+  refImages?: ArchivedRefImage[]          // 参考图快照（新版写入；老条目缺失则回填为空）
+  images: GeneratedImage[]
+}
+
+export type GenerateErrorCode =
+  | 'config'
+  | 'payload'
+  | 'network'
+  | 'timeout'
+  | 'canceled'
+  | 'busy'
+  | 'http'
+  | 'parse'
+  | 'io'
+
+export type GenerateResult =
+  | { ok: true; entry: HistoryEntry }
+  | {
+      ok: false
+      code: GenerateErrorCode
+      status?: number
+      message: string
+      body?: string
+    }

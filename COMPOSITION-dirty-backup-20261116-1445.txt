@@ -1,0 +1,6 @@
+dirty COMPOSITION backup 2026-11-16 14:45 Asia/Shanghai
+pid 65837 window 1332 AXTextArea[63]
+---
+@图1 @图1 ◆ URBAN HARD LIGHT GRADE（城市硬光·三分区调色） @ @                         @图1      @图1@  @图1
+---
+note: contains @ @ and @图1@ fragments, preserved as-is

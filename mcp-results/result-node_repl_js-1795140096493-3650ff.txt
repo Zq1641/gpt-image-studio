@@ -1,0 +1,1366 @@
+===== main/settings.ts (7965 chars) =====
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, chmodSync } from 'node:fs'
+import { join } from 'node:path'
+import { app } from 'electron'
+import { type AppSettings, DEFAULT_MODELS, DEFAULT_SETTINGS, ensureActive, newPresetId, normalizePreset, type Preset } from './presets'
+import { normalizeSkillList, normalizeSkillName, newSkillId, SKILL_CONTENT_MAX } from '../shared/skills'
+import { encryptApiKey, decryptApiKey, isEncryptedApiKey } from './secret'
+
+function settingsPath(): string {
+  return join(app.getPath('userData'), 'settings.json')
+}
+
+// API Key 只在「落盘」这一刻加密、「读取」这一刻解密：
+// macOS 下 safeStorage 底层走系统钥匙串，盘上不再出现明文 Key。
+// 应用内存 / 渲染进程里仍是明文，设置弹窗的编辑、reveal、复制都不受影响。
+// 两个函数都是幂等的：已加密串不会被二次加密，旧的明文 settings.json 也能平滑升级。
+function decryptPresets(s: AppSettings): AppSettings {
+  return {
+    ...s,
+    presets: (s.presets ?? []).map((p) => ({ ...p, apiKey: «redacted 13 chars»(p.apiKey ?? '') })),
+  }
+}
+
+function encryptPresets(s: AppSettings): AppSettings {
+  return {
+    ...s,
+    presets: (s.presets ?? []).map((p) => ({ ...p, apiKey: «redacted 13 chars»(p.apiKey ?? '') })),
+  }
+}
+
+export function loadSettings(): AppSettings {
+  const p = settingsPath()
+  if (!existsSync(p)) return ensureActive({ ...DEFAULT_SETTINGS })
+  try {
+    const raw = readFileSync(p, 'utf-8')
+    const parsed = JSON.parse(raw) as Partial<AppSettings> & {
+      baseUrl?: string; apiKey?: string; model?: string
+      imageFieldName?: 'image' | 'images' | 'image_url'
+      sizeMode?: 'computed' | 'square' | 'omit'
+      sendAspectRatio?: boolean
+    }
+    // 兼容 v1 单字段：把旧版 baseUrl/apiKey/model 全部塞到默认预设里
+    if (parsed.presets == null && (parsed.baseUrl || parsed.apiKey)) {
+      const legacy: Preset = normalizePreset({
+        id: 'default',
+        name: '默认预设',
+        baseUrl: parsed.baseUrl ?? '',
+        apiKey: «redacted 13 chars» ?? '',
+        pricePerImage: 0,
+        model: parsed.model || 'gpt-image-2',
+        imageFieldName: (parsed.imageFieldName ?? 'image') as Preset['imageFieldName'],
+        sizeMode: (parsed.sizeMode ?? 'computed') as Preset['sizeMode'],
+        sendAspectRatio: parsed.sendAspectRatio ?? true,
+      })
+      const ensured = ensureActive({ ...DEFAULT_SETTINGS, presets: [legacy], activePresetId: legacy.id })
+      // 老明文盘 → 立刻回写成加密盘，避免明文继续留在磁盘上
+      try { writeSettings(ensured) } catch { /* ignore */ }
+      return ensured
+    }
+    // 兼容旧版 settings.json：normalizeModels 缺字段/脏数据时都补默认列表
+    const models = normalizeModels(parsed.models)
+    const merged: AppSettings = { ...DEFAULT_SETTINGS, ...(parsed as Partial<AppSettings>), models }
+    const ensured = decryptPresets(ensureActive(merged))
+    // 关键修复：若旧盘上 models 字段缺失/非法，ensureActive 只在内存里补了默认，
+    // 不写盘会导致“每次加载看起来有 4 个、但删除永远删不掉”的幽灵列表。
+    // 这里一次性回填写盘，后续增删就有稳定的基准了。
+    // 顺带把「历史明文 Key」升级为加密盘（写回时统一加密）。
+    if (!Array.isArray(parsed.models) || (parsed.presets ?? []).some((p) => p?.apiKey && !isEncryptedApiKey(p.apiKey))) {
+      try { writeSettings(ensured) } catch { /* ignore */ }
+    }
+    return ensured
+  } catch {
+    return ensureActive({ ...DEFAULT_SETTINGS })
+  }
+}
+
+export function saveSettings(patch: Partial<AppSettings>): AppSettings {
+  const cur = loadSettings()
+  // saveSettings 是全量 patch 合并：若调用方没带 models，必须保留当前盘上的，
+  // 否则一次“只改 timeout”之类的保存就会把用户删过的模型又恢复出来。
+  const next = ensureActive({
+    ...cur,
+    ...patch,
+    models: patch.models === undefined ? cur.models : normalizeModels(patch.models),
+  })
+  writeSettings(next)
+  return next
+}
+
+export function addPreset(input: Omit<Preset, 'id'>): AppSettings {
+  const cur = loadSettings()
+  const p: Preset = normalizePreset({ ...input, id: newPresetId() })
+  const next: AppSettings = ensureActive({ ...cur, presets: [...cur.presets, p] })
+  writeSettings(next)
+  return next
+}
+
+export function updatePreset(p: Preset): AppSettings {
+  const cur = loadSettings()
+  const normalized = normalizePreset(p)
+  const next: AppSettings = ensureActive({
+    ...cur,
+    presets: cur.presets.map((x) => (x.id === normalized.id ? normalized : x)),
+  })
+  writeSettings(next)
+  return next
+}export function deletePreset(id: string): AppSettings {
+  const cur = loadSettings()
+  if (cur.presets.length <= 1) return cur   // 至少保留一条，避免空表
+  const presets = cur.presets.filter((p) => p.id !== id)
+  const activePresetId = cur.activePresetId === id ? presets[0]!.id : cur.activePresetId
+  const next: AppSettings = ensureActive({ ...cur, presets, activePresetId })
+  writeSettings(next)
+  return next
+}
+
+export function setActivePreset(id: string): AppSettings {
+  const cur = loadSettings()
+  if (!cur.presets.find((p) => p.id === id)) return cur
+  const next: AppSettings = ensureActive({ ...cur, activePresetId: id })
+  writeSettings(next)
+  return next
+}
+
+// ---------- Skills ----------
+// 上传入口：name 为空时调用方已按文件名推好默认名；同名视为“覆盖更新”
+// （保留原 id/createdAt，只换 content），不同名追加。
+export function addSkill(input: { name: string; content: string; sourceName?: string }): AppSettings {
+  const cur = loadSettings()
+  const name = normalizeSkillName(input.name)
+  const content = typeof input.content === 'string' ? input.content : ''
+  if (!name || !content.trim() || content.length > SKILL_CONTENT_MAX) return cur
+  const skills = normalizeSkillList(cur.skills)
+  const sourceName = typeof input.sourceName === 'string' ? input.sourceName : ''
+  const at = skills.findIndex((s) => s.name === name)
+  if (at >= 0) {
+    const prev = skills[at]!
+    skills[at] = { ...prev, content, sourceName, charCount: content.length }
+  } else {
+    skills.push({ id: newSkillId(), name, content, sourceName, charCount: content.length, createdAt: Date.now() })
+  }
+  const next: AppSettings = ensureActive({ ...cur, skills })
+  writeSettings(next)
+  return next
+}
+
+export function deleteSkill(id: string): AppSettings {
+  const cur = loadSettings()
+  const skills = normalizeSkillList(cur.skills)
+  if (!skills.some((s) => s.id === id)) return cur
+  const next: AppSettings = ensureActive({ ...cur, skills: skills.filter((s) => s.id !== id) })
+  writeSettings(next)
+  return next
+}
+
+function normalizeModels(input: unknown): string[] {
+  const list = Array.isArray(input) ? input : []
+  const cleaned = list
+    .filter((x): x is string => typeof x === 'string')
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0 && x.length <= 120)
+  const deduped = Array.from(new Set(cleaned))
+  return deduped.length > 0 ? deduped : [...DEFAULT_MODELS]
+}
+
+export function addModel(name: string): AppSettings {
+  const cur = loadSettings()
+  const trimmed = (name ?? '').trim()
+  if (!trimmed || trimmed.length > 120) return cur
+  const models = normalizeModels(cur.models)
+  if (!models.includes(trimmed)) models.push(trimmed)
+  else return cur // 已存在：直接返回，避免无意义写盘触发 UI 抖动
+  const next: AppSettings = ensureActive({ ...cur, models })
+  writeSettings(next)
+  return next
+}
+
+export function deleteModel(name: string): AppSettings {
+  const cur = loadSettings()
+  const trimmed = (name ?? '').trim()
+  if (!trimmed) return cur
+  const before = normalizeModels(cur.models)
+  const models = before.filter((m) => m !== trimmed)
+  // 至少保留一个模型；要删的不存在时直接返回，避免无意义写盘
+  if (models.length === 0 || models.length === before.length) return cur
+  const next: AppSettings = ensureActive({ ...cur, models })
+  // 若当前激活预设用的模型被删了，不动预设（预设允许自定义模型名），只收窄全局列表；
+  // 侧边栏会以虚线 custom chip 展示该预设模型，保证大字与 chips 对得上。
+  writeSettings(next)
+  return next
+}
+
+function writeSettings(s: AppSettings): void {
+  const dir = app.getPath('userData')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  // 落盘前把每个预设的 API Key 加密（内存里的 s 不变，返回给渲染进程仍是明文）。
+  const onDisk = encryptPresets(s)
+  const p = settingsPath()
+  // 原子写：先写同目录 tmp 再 rename，避免进程崩溃时 settings.json 写一半变坏。
+  const tmp = `${p}.tmp`
+  writeFileSync(tmp, JSON.stringify(onDisk, null, 2), { encoding: 'utf-8', mode: 0o600 })
+  // 收紧权限：即使进程 umask 宽松，含 API Key 的文件也只允许当前用户读写。
+  try { chmodSync(tmp, 0o600) } catch { /* ignore */ }
+  renameSync(tmp, p)
+  try { chmodSync(p, 0o600) } catch { /* ignore */ }
+}
+
+
+===== main/presets.ts (2339 chars) =====
+import { randomUUID } from 'node:crypto'
+import { DEFAULT_MODELS, DEFAULT_SETTINGS, type AppSettings, type Preset } from '../shared/types'
+import { normalizeSkillList } from '../shared/skills'
+
+export type { Preset }
+export { DEFAULT_MODELS } from '../shared/types'
+
+// 与 settings.normalizeModels 同规则的本地清洗，避免 presets↔settings 循环 import。
+// 两处规则必须保持一致：trim → 去空/超长 → 去重 → 空则回默认。
+function normalizeModelList(input: unknown): string[] {
+  const list = Array.isArray(input) ? input : []
+  const cleaned = (list as unknown[])
+    .filter((x): x is string => typeof x === 'string')
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0 && x.length <= 120)
+  const deduped = Array.from(new Set(cleaned))
+  return deduped.length > 0 ? deduped : [...DEFAULT_MODELS]
+}
+
+function ensureActive(s: AppSettings): AppSettings {
+  // 每次都保证 models / skills 字段存在（兼容旧版 settings.json 缺字段的情况），
+  // 避免下游 deleteModel 写回的结果被一次“补默认”覆盖掉。
+  const models = normalizeModelList((s as Partial<AppSettings>).models)
+  const skills = normalizeSkillList((s as Partial<AppSettings>).skills)
+  // 兼容旧版 settings.json：保留字段已废弃时回到默认；预设列表为空时塞一条默认
+  if (!Array.isArray(s.presets) || s.presets.length === 0) {
+    const first = DEFAULT_SETTINGS.presets[0]!
+    return { ...DEFAULT_SETTINGS, ...s, models, skills, presets: [first], activePresetId: first.id }
+  }
+  if (!s.presets.find((p) => p.id === s.activePresetId)) {
+    return { ...s, models, skills, activePresetId: s.presets[0]!.id }
+  }
+  if (!Array.isArray((s as Partial<AppSettings>).models) || !Array.isArray((s as Partial<AppSettings>).skills)) {
+    return { ...s, models, skills }
+  }
+  return s
+}
+
+export function newPresetId(): string {
+  return randomUUID()
+}
+
+export function normalizePreset(p: Preset): Preset {
+  return {
+    id: p.id,
+    name: p.name?.trim() || '未命名预设',
+    baseUrl: p.baseUrl?.trim().replace(/\/$/, '') || '',
+    apiKey: «redacted 8 chars» ?? '',
+    pricePerImage: Number.isFinite(p.pricePerImage) ? Math.max(0, p.pricePerImage) : 0,
+    model: p.model?.trim() || 'gpt-image-2',
+    imageFieldName: p.imageFieldName,
+    sizeMode: p.sizeMode,
+    sendAspectRatio: !!p.sendAspectRatio,
+  }
+}
+
+export function activePreset(s: AppSettings): Preset {
+  return s.presets.find((p) => p.id === s.activePresetId) ?? s.presets[0]!
+}
+
+export type { AppSettings }
+export { DEFAULT_SETTINGS, ensureActive }
+
+
+===== main/api.ts (4534 chars) =====
+import axios, { type AxiosError, type AxiosResponse } from 'axios'
+import type { GenerateRequest, GenerateResult } from '../shared/types'
+import { loadSettings } from './settings'
+import { activePreset } from './presets'
+import { normalizeResponse } from './normalize'
+import { generateQueue } from './queue'
+
+const CONTROLLERS = new Map<string, AbortController>()
+// FIFO串行：所有生成请求经 generateQueue.enqueue 排队，与 CLI / MCP 同队列语义。
+
+function bodySnippet(s: string): string {
+  return s.length > 2000 ? s.slice(0, 2000) + '…' : s
+}
+
+export async function generate(req: GenerateRequest): Promise<GenerateResult> {
+  const settings = loadSettings()
+  const preset = activePreset(settings)
+  if (!preset.baseUrl) return { ok: false, code: 'config', message: '当前预设未配置 API Base URL，请到设置中编辑预设' }
+  if (!preset.apiKey) return { ok: false, code: 'config', message: '当前预设未配置 API Key，请到设置中编辑预设' }
+
+  const payloadBytes = req.images.reduce((sum, s) => sum + Math.floor(s.length * 0.75), 0)
+  if (payloadBytes > 20 * 1024 * 1024) {
+    return { ok: false, code: 'payload', message: `参考图总体积 ${(payloadBytes / 1024 / 1024).toFixed(1)}MB 过大（建议 ≤ 20MB）` }
+  }
+
+  const body: Record<string, unknown> = {
+    model: preset.model,
+    prompt: req.promptResolved,
+    n: req.params.count,
+    ...(req.params.quality !== 'auto' ? { quality: req.params.quality } : {}),
+  }
+  const { sizeString } = await import('../shared/size')
+  const size = sizeString(req.params.aspect, req.params.resolution, preset.sizeMode)
+  if (size) body.size = size
+  if (preset.sendAspectRatio) body.aspect_ratio = req.params.aspect
+  if (req.images.length > 0) {
+    const v = req.images.length === 1 ? req.images[0] : req.images
+    body[preset.imageFieldName] = v
+  }
+
+  const url = `${preset.baseUrl}/v1/images/generations`
+
+  console.log('[generate] enqueue', req.requestId, 'queueDepth=', generateQueue.pending())
+  console.log('[file] protocol check images=', req.images.length, 'job_id=', req.requestId)
+  return generateQueue.enqueue(async (): Promise<GenerateResult> => {
+    console.log('[generate] dequeue start', req.requestId)
+    console.log('[job] start job_id=', req.requestId, 'model=', preset.model, 'count=', req.params.count)
+    let lastErr: unknown = null
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log('[job] attempt', attempt + '/3', req.requestId)
+      const ctrl = new AbortController()
+      CONTROLLERS.set(req.requestId, ctrl)
+      try {
+        const resp: AxiosResponse = await axios.post(url, body, {
+          headers: {
+            Authorization: `Bearer ${preset.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: settings.timeoutMs,
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+          signal: ctrl.signal,
+          responseType: 'json',
+        })
+        const r = await normalizeResponse(req, resp.data)
+        console.log('[generate] done', req.requestId, r.ok ? 'ok' : (r as { code?: string }).code)
+        return r
+      } catch (e) {
+        const ax = e as AxiosError
+        if (ax.name === 'CanceledError' || ax.code === 'ERR_CANCELED') {
+          console.log('[generate] canceled', req.requestId)
+          return { ok: false, code: 'canceled', message: '已取消' }
+        }
+        if (ax.code === 'ECONNABORTED') {
+          console.log('[generate] timeout', req.requestId)
+          lastErr = e
+          console.log('[job] retry', req.requestId, 'attempt', attempt)
+          continue
+        }
+        if (ax.response) {
+          const status = ax.response.status
+          const data = ax.response.data
+          const bodyStr = typeof data === 'string' ? data : (() => { try { return JSON.stringify(data) } catch { return String(data) } })()
+          console.log('[generate] http', req.requestId, status, bodySnippet(bodyStr).slice(0, 200))
+          return { ok: false, code: 'http', status, message: `HTTP ${status}`, body: bodySnippet(bodyStr) }
+        }
+        console.log('[generate] network error', req.requestId, ax.message)
+        lastErr = e
+        console.log('[job] retry', req.requestId, 'attempt', attempt)
+        continue
+      } finally {
+        CONTROLLERS.delete(req.requestId)
+      }
+    }
+    return { ok: false, code: 'network', message: (lastErr as Error)?.message || '网络错误（已重试3次）' }
+  })
+}
+
+export function cancel(requestId: string): void {
+  const c = CONTROLLERS.get(requestId)
+  if (c) {
+    c.abort()
+    CONTROLLERS.delete(requestId)
+  }
+  console.log('[generate] cancel requested', requestId)
+}
+
+
+===== renderer/components/SettingsModal.tsx (13994 chars) =====
+import { useState } from 'react'
+import { useComposer } from '../state/useComposer'
+import type { ImageFieldName, Preset, SizeMode } from '@shared/types'
+
+const EMPTY: Omit<Preset, 'id'> = {
+  name: '',
+  baseUrl: '',
+  apiKey: '',
+  pricePerImage: 0,
+  model: 'gpt-image-2',
+  imageFieldName: 'image',
+  sizeMode: 'computed',
+  sendAspectRatio: true,
+}
+
+export function SettingsModal({ onClose }: { onClose: () => void }) {
+  const { state, reloadSettings } = useComposer()
+  const presets = state.settings.presets
+  const activeId = state.settings.activePresetId
+  const models = state.settings.models ?? []
+  const [editing, setEditing] = useState<Preset | Omit<Preset, 'id'> | null>(null)
+  const [newModel, setNewModel] = useState('')
+  const [modelError, setModelError] = useState<string | null>(null)
+  const [modelPending, setModelPending] = useState<string | null>(null)
+
+  const addModelEntry = async (name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setModelError(null)
+    try {
+      await window.api.addModel(trimmed)
+      setNewModel('')
+      await reloadSettings()
+    } catch (e) {
+      setModelError(e instanceof Error ? e.message : '添加模型失败')
+    }
+  }
+
+  const removeModelEntry = async (name: string) => {
+    if (models.length <= 1) {
+      setModelError('至少需要保留一个模型')
+      setModelPending(null)
+      return
+    }
+    setModelError(null)
+    try {
+      await window.api.deleteModel(name)
+      setModelPending(null)
+      await reloadSettings()
+    } catch (e) {
+      setModelError(e instanceof Error ? e.message : '删除模型失败')
+    }
+  }
+
+  const saveEdit = async (p: Preset | Omit<Preset, 'id'>) => {
+    if ('id' in p && p.id) {
+      await window.api.updatePreset(p as Preset)
+    } else {
+      await window.api.addPreset(p)
+    }
+    await reloadSettings()
+    setEditing(null)
+  }
+
+  const handleDelete = async (id: string, name: string) => {
+    if (presets.length <= 1) {
+      alert('至少需要保留一个预设')
+      return
+    }
+    if (!confirm(`确认删除预设「${name}」？`)) return
+    await window.api.deletePreset(id)
+    await reloadSettings()
+  }
+
+  return (
+    <div role="dialog" aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(20, 18, 15, 0.45)',
+        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+      }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 580, maxHeight: '85vh', overflow: 'auto',
+          background: 'var(--bg-card)', borderRadius: 'var(--r-md)',
+          border: '1px solid var(--line-strong)',
+          boxShadow: 'var(--shadow-pop)', padding: 28,
+        }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 20 }}>
+          <h2 style={{
+            margin: 0, fontFamily: 'var(--font-display)', fontStyle: 'italic',
+            fontSize: 28, fontWeight: 500, color: 'var(--text-1)', letterSpacing: '-0.01em',
+          }}>Presets & Settings</h2>
+          <button type="button" className="pill" onClick={() => setEditing({ ...EMPTY })}>+ Add</button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {presets.map((p) => (
+            <PresetRow
+              key={p.id}
+              preset={p}
+              isActive={p.id === activeId}
+              canDelete={presets.length > 1}
+              onEdit={() => setEditing(p)}
+              onDelete={() => void handleDelete(p.id, p.name)}
+            />
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+          <button type="button" className="pill" onClick={onClose}>完成</button>
+        </div>
+
+        <div style={{ marginTop: 20, borderTop: '1px solid var(--rule)', paddingTop: 16 }}>
+          <div className="field-label" style={{ marginBottom: 8 }}>全局模型列表 · Models</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+            {models.map((m) => (
+              <span key={m} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                border: modelPending === m ? '1px solid var(--danger)' : '1px solid var(--line)',
+                background: modelPending === m ? 'var(--danger-soft)' : 'transparent',
+                borderRadius: 999,
+                padding: '3px 4px 3px 10px',
+                fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-1)',
+              }}>
+                {m}
+                {models.length > 1 && (
+                  <button type="button" className="pill" style={{ padding: '1px 8px' }}
+                    title={modelPending === m ? '再点一次取消' : `移除 ${m}`}
+                    onClick={() => {
+                      if (modelPending === m) setModelPending(null)
+                      else { setModelError(null); setModelPending(m) }
+                    }}
+                  >×</button>
+                )}
+              </span>
+            ))}
+          </div>
+          {modelPending && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+              border: '1px solid rgba(184, 36, 45, 0.4)', background: 'var(--danger-soft)',
+              borderRadius: 'var(--r-sm)', padding: '6px 8px', marginBottom: 10,
+              fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--danger)',
+            }}>
+              <span>移除「{modelPending}」？</span>
+              <span style={{ display: 'flex', gap: 4 }}>
+                <button type="button" className="pill danger" style={{ padding: '3px 8px' }}
+                  onClick={() => void removeModelEntry(modelPending)}>确认删除</button>
+                <button type="button" className="pill" style={{ padding: '3px 8px' }}
+                  onClick={() => setModelPending(null)}>取消</button>
+              </span>
+            </div>
+          )}
+          {modelError && (
+            <div style={{
+              fontFamily: 'var(--font-mono)', fontSize: 10,
+              color: 'var(--danger)', marginBottom: 10,
+            }}>{modelError}</div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input type="text" value={newModel}
+              onChange={(e) => setNewModel(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newModel.trim()) void addModelEntry(newModel)
+              }}
+              placeholder="新增模型，例如 gpt-image-2-turbo"
+              style={{ flex: 1 }} />
+            <button type="button" className="pill"
+              disabled={!newModel.trim()}
+              onClick={() => void addModelEntry(newModel)}
+            >+ 添加</button>
+          </div>
+        </div>
+
+        {editing && (
+          <PresetEditor
+            draft={editing}
+            onCancel={() => setEditing(null)}
+            onSave={(p) => void saveEdit(p)}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PresetRow({
+  preset, isActive, canDelete, onEdit, onDelete,
+}: { preset: Preset; isActive: boolean; canDelete: boolean; onEdit: () => void; onDelete: () => void }) {
+  return (
+    <div style={{
+      border: '1px solid var(--line)', borderRadius: 10,
+      padding: '10px 12px', background: 'var(--bg-input)',
+      display: 'flex', alignItems: 'center', gap: 10,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>{preset.name}</span>
+          {isActive && (
+            <span style={{
+              fontSize: 10, padding: '2px 6px', borderRadius: 4,
+              background: 'rgba(52,199,89,0.18)', color: '#1A7F37',
+            }}>当前激活</span>
+          )}
+          {preset.pricePerImage > 0 && (
+            <span style={{
+              fontSize: 11, color: '#007AFF',
+            }}>¥{preset.pricePerImage.toFixed(2)}/张</span>
+          )}
+        </div>
+        <div style={{
+          fontSize: 12, color: 'var(--text-3)', marginTop: 2,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{preset.baseUrl || '未填写 Base URL'} · {preset.model}</div>
+      </div>
+      <button type="button" className="pill" onClick={onEdit}>编辑</button>
+      <button type="button" className="pill"
+        onClick={onDelete}
+        disabled={!canDelete}
+        style={{ color: canDelete ? '#D70015' : 'var(--text-3)' }}
+        title={canDelete ? '删除此预设' : '至少保留一条预设'}
+      >删除</button>
+    </div>
+  )
+}
+
+function PresetEditor({
+  draft, onCancel, onSave,
+}: {
+  draft: Preset | Omit<Preset, 'id'>
+  onCancel: () => void
+  onSave: (p: Preset | Omit<Preset, 'id'>) => void
+}) {
+  const { state } = useComposer()
+  const models = state.settings.models ?? []
+  const [local, setLocal] = useState(draft)
+  const [reveal, setReveal] = useState(false)
+
+  const valid = local.name.trim().length > 0
+    && /^https?:\/\//.test(local.baseUrl.trim())
+    && local.apiKey.trim().length > 0
+
+  return (
+    <div onClick={(e) => e.stopPropagation()}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 101,
+      }}>
+      <div style={{
+        width: 480, maxHeight: '85vh', overflow: 'auto',
+        background: 'var(--bg-card)', borderRadius: 14,
+        boxShadow: 'var(--shadow-pop)', padding: 24,
+      }}>
+        <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 600 }}>
+          {'id' in local && local.id ? '编辑预设' : '新增预设'}
+        </h3>
+
+        <div className="field" style={{ marginBottom: 12 }}>
+          <label className="field-label">预设名称</label>
+          <input type="text" value={local.name}
+            onChange={(e) => setLocal({ ...local, name: e.target.value })}
+            placeholder="例如：主力 ClaudeCode 站" />
+        </div>
+
+        <div className="field" style={{ marginBottom: 12 }}>
+          <label className="field-label">API Base URL（无尾斜杠、无 /v1）</label>
+          <input type="text" value={local.baseUrl}
+            onChange={(e) => setLocal({ ...local, baseUrl: e.target.value })}
+            placeholder="https://api.example.com" />
+        </div>
+
+        <div className="field" style={{ marginBottom: 12 }}>
+          <label className="field-label">API Key</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input type={reveal ? 'text' : 'password'} value={local.apiKey}
+              onChange={(e) => setLocal({ ...local, apiKey: «redacted 14 chars» })}
+              style={{ flex: 1 }} />
+            <button type="button" className="pill" onClick={() => setReveal((r) => !r)}>
+              {reveal ? '隐藏' : '显示'}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label className="field-label">单次价格（元/张）</label>
+            <input type="number" min={0} step={0.01} value={local.pricePerImage}
+              onChange={(e) => setLocal({ ...local, pricePerImage: Number(e.target.value) || 0 })} />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label className="field-label">模型（跟随本预设 · 点选或手输）</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {models.map((m) => (
+                <span key={m}
+                  className={`model-chip ${local.model === m ? 'is-active' : ''}`}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setLocal({ ...local, model: m })}>
+                  <span className="model-chip-name" style={{ cursor: 'pointer' }}>{m}</span>
+                </span>
+              ))}
+            </div>
+            <input type="text" value={local.model}
+              onChange={(e) => setLocal({ ...local, model: e.target.value })}
+              placeholder="也可直接输入自定义模型名"
+              style={{ marginTop: 6 }} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label className="field-label">参考图字段名</label>
+            <select value={local.imageFieldName}
+              onChange={(e) => setLocal({ ...local, imageFieldName: e.target.value as ImageFieldName })}>
+              <option value="image">image（单图）</option>
+              <option value="images">images（数组）</option>
+              <option value="image_url">image_url</option>
+            </select>
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label className="field-label">尺寸模式</label>
+            <select value={local.sizeMode}
+              onChange={(e) => setLocal({ ...local, sizeMode: e.target.value as SizeMode })}>
+              <option value="computed">按比例计算</option>
+              <option value="square">正方形</option>
+              <option value="omit">不发送</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <input id="epAspect" type="checkbox" checked={local.sendAspectRatio}
+            onChange={(e) => setLocal({ ...local, sendAspectRatio: e.target.checked })} />
+          <label className="field-label" htmlFor="epAspect" style={{ margin: 0 }}>
+            同时发送 aspect_ratio 字段
+          </label>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
+          <button type="button" className="pill" onClick={onCancel}>取消</button>
+          <button type="button" className="generate-btn"
+            onClick={() => onSave(local)}
+            disabled={!valid}
+            style={{ minWidth: 100, padding: '8px 16px', fontSize: 14, opacity: valid ? 1 : 0.4 }}
+          >保存</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+===== shared/ipc.ts (2090 chars) =====
+import type {
+  AppSettings,
+  CacheStats,
+  GenerateRequest,
+  GenerateResult,
+  HistoryEntry,
+  Preset,
+} from './types'
+
+export const CH = {
+  settingsGet: 'settings:get',
+  settingsSet: 'settings:set',
+  modelsAdd: 'models:add',
+  modelsDelete: 'models:delete',
+  // 预设 CRUD + 激活切换
+  presetsAdd: 'presets:add',
+  presetsUpdate: 'presets:update',
+  presetsDelete: 'presets:delete',
+  presetsSetActive: 'presets:setActive',
+  // Skills：上传（同名覆盖） + 删除
+  skillsAdd: 'skills:add',
+  skillsDelete: 'skills:delete',
+  // 历史：清空 + 下载原图（单张或全部）
+  historyClear: 'history:clear',
+  historyDownload: 'history:download',
+  historyDownloadAll: 'history:download-all',
+  // 缓存：统计 + 按项清理
+  cacheStats: 'cache:stats',
+  cacheClearImages: 'cache:clear-images',
+  cacheClearRefs: 'cache:clear-refs',
+  cacheClearAll: 'cache:clear-all',
+  generateRun: 'generate:run',
+  generateCancel: 'generate:cancel',
+  historyList: 'history:list',
+  historyDelete: 'history:delete',
+} as const
+
+export interface Api {
+  getSettings(): Promise<AppSettings>
+  saveSettings(patch: Partial<AppSettings>): Promise<AppSettings>
+  addModel(name: string): Promise<AppSettings>
+  deleteModel(name: string): Promise<AppSettings>
+  addPreset(p: Omit<Preset, 'id'>): Promise<AppSettings>
+  updatePreset(p: Preset): Promise<AppSettings>
+  deletePreset(id: string): Promise<AppSettings>
+  setActivePreset(id: string): Promise<AppSettings>
+  addSkill(input: { name: string; content: string; sourceName?: string }): Promise<AppSettings>
+  deleteSkill(id: string): Promise<AppSettings>
+  clearHistory(): Promise<HistoryEntry[]>
+  downloadHistoryFile(filename: string): Promise<void>
+  downloadHistoryFiles(filenames: string[]): Promise<void>
+  getCacheStats(): Promise<CacheStats>
+  clearGeneratedImages(): Promise<CacheStats>
+  clearRefCache(): Promise<CacheStats>
+  clearAllCache(): Promise<{ entries: HistoryEntry[]; stats: CacheStats }>
+  generate(req: GenerateRequest): Promise<GenerateResult>
+  cancel(requestId: string): Promise<void>
+  listHistory(): Promise<HistoryEntry[]>
+  deleteHistory(id: string): Promise<HistoryEntry[]>
+}
+
+
+===== preload/index.ts (1602 chars) =====
+import { contextBridge, ipcRenderer } from 'electron'
+import { CH } from '../shared/ipc'
+import type { Api } from '../shared/ipc'
+
+const api: Api = {
+  getSettings: () => ipcRenderer.invoke(CH.settingsGet),
+  saveSettings: (patch) => ipcRenderer.invoke(CH.settingsSet, patch),
+  addModel: (name) => ipcRenderer.invoke(CH.modelsAdd, name),
+  deleteModel: (name) => ipcRenderer.invoke(CH.modelsDelete, name),
+  addPreset: (p) => ipcRenderer.invoke(CH.presetsAdd, p),
+  updatePreset: (p) => ipcRenderer.invoke(CH.presetsUpdate, p),
+  deletePreset: (id) => ipcRenderer.invoke(CH.presetsDelete, id),
+  setActivePreset: (id) => ipcRenderer.invoke(CH.presetsSetActive, id),
+  addSkill: (input) => ipcRenderer.invoke(CH.skillsAdd, input),
+  deleteSkill: (id) => ipcRenderer.invoke(CH.skillsDelete, id),
+  clearHistory: () => ipcRenderer.invoke(CH.historyClear),
+  downloadHistoryFile: (filename) => ipcRenderer.invoke(CH.historyDownload, filename),
+  downloadHistoryFiles: (filenames) => ipcRenderer.invoke(CH.historyDownloadAll, filenames),
+  getCacheStats: () => ipcRenderer.invoke(CH.cacheStats),
+  clearGeneratedImages: () => ipcRenderer.invoke(CH.cacheClearImages),
+  clearRefCache: () => ipcRenderer.invoke(CH.cacheClearRefs),
+  clearAllCache: () => ipcRenderer.invoke(CH.cacheClearAll),
+  generate: (req) => ipcRenderer.invoke(CH.generateRun, req),
+  cancel: (requestId) => ipcRenderer.invoke(CH.generateCancel, { requestId }),
+  listHistory: () => ipcRenderer.invoke(CH.historyList),
+  deleteHistory: (id) => ipcRenderer.invoke(CH.historyDelete, { id }),
+}
+
+contextBridge.exposeInMainWorld('api', api)
+
+
+===== main/normalize.ts (9073 chars) =====
+import { writeFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { app } from 'electron'
+import type { GenerateRequest, GenerateResult, HistoryEntry } from '../shared/types'
+import { sizeString } from '../shared/size'
+import { loadSettings } from './settings'
+import { activePreset } from './presets'
+
+interface RawImage {
+  file: string
+  url: string
+  width?: number
+  height?: number
+  mime: 'image/png'
+  bytes: number
+}
+
+function id(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+}
+
+function safeId(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_-]/g, '_')
+}
+
+function imagesDir(): string {
+  const d = join(app.getPath('userData'), 'images')
+  mkdirSync(d, { recursive: true })
+  return d
+}
+
+// URL 回包下载：60s 超时 + 50MB 体积上限。
+// 之前是裸 net.request：中转站返回超大/假死 URL 会一直挂着不回来，
+// 内存里攒 Buffer 也可能把主进程撑爆。超限直接报 io 错，不写盘、不进历史。
+const URL_DOWNLOAD_TIMEOUT_MS = 60_000
+const URL_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+async function downloadIfUrl(url: string): Promise<{ data: Buffer; mime: string } | { ok: false }> {
+  try {
+    const { net } = await import('electron')
+    return await new Promise((resolve) => {
+      let settled = false
+      const done = (v: { data: Buffer; mime: string } | { ok: false }) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(v)
+      }
+      const timer = setTimeout(() => {
+        try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+        done({ ok: false })
+      }, URL_DOWNLOAD_TIMEOUT_MS)
+      const req = net.request({ url, method: 'GET' })
+      const chunks: Buffer[] = []
+      let received = 0
+      let mime = 'image/png'
+      req.on('response', (resp) => {
+        // Content-Length 先验：超限直接掐掉，连 body 都不收
+        const cl = resp.headers['content-length']
+        const declared = Array.isArray(cl) ? cl[0] : cl
+        if (typeof declared === 'string' && /^\d+$/.test(declared.trim())) {
+          if (Number(declared) > URL_DOWNLOAD_MAX_BYTES) {
+            try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+            done({ ok: false })
+            return
+          }
+        }
+        const ct = resp.headers['content-type']
+        if (typeof ct === 'string') mime = ct.split(';')[0] || mime
+        resp.on('data', (c) => {
+          received += (c as Buffer).length
+          if (received > URL_DOWNLOAD_MAX_BYTES) {
+            try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+            done({ ok: false })
+            return
+          }
+          chunks.push(c as Buffer)
+        })
+        resp.on('end', () => done({ data: Buffer.concat(chunks), mime }))
+        resp.on('error', () => done({ ok: false } as never))
+      })
+      req.on('error', () => done({ ok: false } as never))
+      req.end()
+    })
+  } catch {
+    return { ok: false } as never
+  }
+}
+
+export async function normalizeResponse(req: GenerateRequest, raw: unknown): Promise<GenerateResult> {
+  const images = extractImages(raw)
+  if (images.length === 0) {
+    const bodyStr = typeof raw === 'string' ? raw : (() => { try { return JSON.stringify(raw) } catch { return String(raw) } })()
+    return { ok: false, code: 'parse', message: '未识别的响应格式', body: bodyStr.slice(0, 2000) }
+  }
+
+  // If the proxy returned FEWER images than we asked for, the upstream model
+  // probably capped `n` silently (or the proxy dropped a plate while
+  // re-wrapping the response). Log it loudly so a developer running with
+  // DevTools open sees what really came back — and include it in the user-
+  // facing message so the discrepancy isn't hidden.
+  const requested = req.params.count
+  if (images.length < requested) {
+    console.warn(`[normalize] requested ${requested} image(s), proxy returned ${images.length}`)
+  }
+
+  const entry: HistoryEntry = {
+    id: id(),
+    createdAt: Date.now(),
+    presetName: activePreset(loadSettings()).name,
+    model: activePreset(loadSettings()).model,
+    promptRaw: req.promptRaw,
+    promptResolved: req.promptResolved,
+    params: req.params,
+    size: sizeString(req.params.aspect, req.params.resolution, 'computed'),
+    refImageFiles: [],
+    // 参考图快照随历史持久化，回填时可直接恢复（老条目没有则为空）。
+    // 注意体积：快照是 JPEG dataUrl，history.json 会随条目线性变大，
+    // 瘦身请用 Cache 弹窗的“参考图快照”清理（只剥快照、不动历史）。
+    refImages: Array.isArray(req.refImages) ? req.refImages : [],
+    images: [],
+  }
+
+  const dir = imagesDir()
+  const saved: RawImage[] = []
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i]
+    if (!img) continue
+    const name = `${safeId(req.requestId)}-${i}.png`
+    try {
+      if (img.kind === 'b64') {
+        const bytes = Buffer.from(img.data, 'base64')
+        writeFileSync(join(dir, name), bytes)
+        saved.push({ file: name, url: `img://${name}`, mime: 'image/png', bytes: bytes.length })
+        console.log('[localFile] saved', name, bytes.length + 'B', `img://${name}`);
+      } else {
+        const got = await downloadIfUrl(img.url)
+        if ('ok' in got) {
+          return { ok: false, code: 'io', message: '下载生成图片失败（超时或文件过大，限 60s / 50MB）' }
+        }
+        writeFileSync(join(dir, name), got.data)
+        saved.push({ file: name, url: `img://${name}`, mime: 'image/png', bytes: got.data.length })
+      }
+    } catch (e) {
+      return { ok: false, code: 'io', message: `写入图片失败：${(e as Error).message}` }
+    }
+  }
+
+  entry.images = saved.map((s) => ({ file: s.file, url: s.url }))
+  console.log('[job] job_id=', req.requestId, 'saved', saved.length + '/' + images.length, 'size=', req.params.aspect, req.params.resolution);
+  console.log('[file] protocol img:// files=', saved.map((s) => s.file).slice(0, 4).join(','));
+  return { ok: true, entry }
+}
+
+type Extracted = { kind: 'b64'; data: string } | { kind: 'url'; url: string }
+
+// Pull every image we can find out of an arbitrary response object.
+//
+// Proxies in the wild wrap OpenAI-style responses in many shapes. We used
+// to only handle the canonical `{ data: [{ b64_json }, ...] }` and top-level
+// `b64_json` / `url` fallbacks. That dropped images silently when a proxy
+// used e.g. `{ data: { b64_json: ["...", "..."] } }` (data is an OBJECT,
+// not an array) or wrapped urls differently, so a 2-image request would
+// surface only 1 — and the user saw "API charged for 2 but UI shows 1".
+//
+// This walker accepts the canonical format plus the common wrappers:
+//   - canonical array:   { data: [{ b64_json } | { url }, ...] }
+//   - alt array keys:    { images: [...] }, { output: [...] }, { result: [...] }
+//   - data-as-object:    { data: { b64_json: "..." | [...] } }
+//                        { data: { url: "..." | [...] } }
+//                        { data: { images: [...] } }
+//   - top-level scalar:  { b64_json: "..." }, { url: "..." }
+//   - top-level array:   { b64_json: ["...", "..."] }, { url: ["...", "..."] }
+function extractImages(raw: unknown): Extracted[] {
+  if (!raw || typeof raw !== 'object') return []
+  const out: Extracted[] = []
+  const r = raw as Record<string, unknown>
+
+  const pushStrings = (v: unknown, kind: 'b64' | 'url') => {
+    if (typeof v === 'string' && v.length > 0) {
+      out.push(kind === 'b64' ? { kind: 'b64', data: v } : { kind: 'url', url: v })
+    } else if (Array.isArray(v)) {
+      for (const x of v) {
+        if (typeof x === 'string' && x.length > 0) {
+          out.push(kind === 'b64' ? { kind: 'b64', data: x } : { kind: 'url', url: x })
+        }
+      }
+    }
+  }
+
+  const arrayKeys = ['data', 'images', 'output', 'result']
+  for (const key of arrayKeys) {
+    const v = r[key]
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (!item || typeof item !== 'object') continue
+        const it = item as Record<string, unknown>
+        if (typeof it.b64_json === 'string') out.push({ kind: 'b64', data: it.b64_json })
+        else if (typeof it.url === 'string') out.push({ kind: 'url', url: it.url })
+      }
+    } else if (v && typeof v === 'object') {
+      // data-as-object: { data: { b64_json: ... | [...] } } etc.
+      const inner = v as Record<string, unknown>
+      pushStrings(inner.b64_json, 'b64')
+      pushStrings(inner.url, 'url')
+      if (Array.isArray(inner.images)) {
+        for (const item of inner.images) {
+          if (!item || typeof item !== 'object') continue
+          const it = item as Record<string, unknown>
+          if (typeof it.b64_json === 'string') out.push({ kind: 'b64', data: it.b64_json })
+          else if (typeof it.url === 'string') out.push({ kind: 'url', url: it.url })
+        }
+      }
+    }
+  }
+
+  // Top-level scalar / array fallbacks.
+  pushStrings(r.b64_json, 'b64')
+  pushStrings(r.url, 'url')
+
+  // Dedup by content (some proxies duplicate b64_json at top-level AND
+  // inside data — we'd otherwise write the same plate twice).
+  const seen = new Set<string>()
+  return out.filter((e) => {
+    const key = e.kind === 'b64' ? `b:${e.data.slice(0, 64)}:${e.data.length}` : `u:${e.url}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+
+===== renderer/state/useComposer.tsx (13109 chars) =====
+import {
+  createContext, useContext, useEffect, useMemo, useReducer, useRef,
+} from 'react'
+import type { ReactNode } from 'react'
+import type {
+  AspectRatio, Count, GeneratedImage, GenerateParams, GenerateRequest,
+  HistoryEntry, Preset, Quality, RefImage, Resolution,
+} from '@shared/types'
+import { DEFAULT_SETTINGS, getSupportedQualities, normalizeQuality, normalizeResolution, type AppSettings } from '@shared/types'
+import { TEMPLATES, type TemplateId } from '../data/templates'
+
+type Status = 'idle' | 'loading' | 'error'
+
+interface ComposerState {
+  prompt: string
+  params: GenerateParams
+  refImages: RefImage[]
+  status: Status
+  activeRequestId?: string
+  error?: { code: string; message: string; body?: string }
+  results: GeneratedImage[]
+  history: HistoryEntry[]
+  settings: AppSettings
+  // 当前预览条目（生成的新结果，或历史回填）。previewEntry.images 决定 PreviewBox 渲染哪些图
+  previewEntry?: HistoryEntry
+}
+
+type Action =
+  | { type: 'set-prompt'; value: string }
+  | { type: 'set-param'; key: keyof GenerateParams; value: GenerateParams[keyof GenerateParams] }
+  | { type: 'apply-template'; id: TemplateId }
+  | { type: 'set-refs'; refs: RefImage[] }
+  | { type: 'set-status'; status: Status; error?: ComposerState['error']; requestId?: string }
+  | { type: 'set-results'; results: GeneratedImage[]; entry?: HistoryEntry }
+  | { type: 'set-history'; history: HistoryEntry[] }
+  | { type: 'set-settings'; settings: AppSettings }
+  | { type: 'set-preview'; entry: HistoryEntry | undefined }
+
+const INITIAL_PARAMS: GenerateParams = { aspect: '1:1', resolution: 'auto', quality: 'auto', count: 1 }
+
+const initialState: ComposerState = {
+  prompt: '',
+  params: INITIAL_PARAMS,
+  refImages: [],
+  status: 'idle',
+  error: undefined,
+  results: [],
+  history: [],
+  settings: DEFAULT_SETTINGS,
+}
+
+function reducer(state: ComposerState, action: Action): ComposerState {
+  switch (action.type) {
+    case 'set-prompt': return { ...state, prompt: action.value }
+    case 'set-param': return { ...state, params: { ...state.params, [action.key]: action.value } }
+    case 'apply-template': {
+      const t = TEMPLATES.find((x) => x.id === action.id)
+      return t ? { ...state, prompt: t.text } : state
+    }
+    case 'set-refs': return { ...state, refImages: action.refs }
+    case 'set-status':
+      return {
+        ...state,
+        status: action.status,
+        error: action.error,
+        activeRequestId: action.status === 'loading' ? action.requestId : undefined,
+      }
+    case 'set-results':
+      return { ...state, results: action.results, previewEntry: action.entry, activeRequestId: undefined }
+    case 'set-history': return { ...state, history: action.history }
+    case 'set-settings': return { ...state, settings: action.settings }
+    case 'set-preview': return { ...state, previewEntry: action.entry, results: action.entry?.images ?? [] }
+    default: return state
+  }
+}
+
+interface ComposerApi {
+  state: ComposerState
+  setPrompt(v: string): void
+  setParam(key: keyof GenerateParams, value: AspectRatio | Resolution | Quality | Count): void
+  applyTemplate(id: TemplateId): void
+  insertSkill(name: string): void
+  setRefs(refs: RefImage[]): void
+  runGenerate(promptResolved: string): Promise<void>
+  cancelGenerate(): Promise<void>
+  refreshHistory(): Promise<void>
+  reloadSettings(): Promise<void>
+  setActivePreset(id: string): Promise<void>
+  setPresetModel(id: string, model: string): Promise<void>
+  addModel(name: string): Promise<void>
+  deleteModel(name: string): Promise<void>
+  addSkill(input: { name: string; content: string; sourceName?: string }): Promise<void>
+  deleteSkill(id: string): Promise<void>
+  saveSettings(patch: Partial<AppSettings>): Promise<void>
+  deleteHistoryEntry(id: string): Promise<void>
+  refillFromHistory(h: HistoryEntry): void
+}
+
+const ComposerContext = createContext<ComposerApi | null>(null)
+
+export function ComposerProvider({ children }: { children: ReactNode }) {
+  const [state, dispatch] = useReducer(reducer, initialState)
+  // 最新 state 的 ref：runGenerate 是异步的，await 之后闭包里的 state 会过期，
+  // 用 ref 拿“发起时的 prompt/params/refImages”快照，避免竞态。
+  const stateRef = useRef(state)
+  stateRef.current = state
+
+  useEffect(() => {
+    if (!window.api) return
+    void window.api.getSettings().then((s) => dispatch({ type: 'set-settings', settings: s }))
+    void window.api.listHistory().then((h) => dispatch({ type: 'set-history', history: h }))
+  }, [])
+
+  const api: ComposerApi = useMemo(() => ({
+    state,
+    setPrompt(v) { dispatch({ type: 'set-prompt', value: v }) },
+    setParam(key, value) { dispatch({ type: 'set-param', key: key as keyof GenerateParams, value: value as never }) },
+    applyTemplate(id) { dispatch({ type: 'apply-template', id }) },
+    // 点击右上角 skill → 在 prompt 末尾追加一个 skill token（`⟦skill:NAME⟧ `）。
+    // 重复点击同一 skill 不重复追加；PromptEditor 会把它 render 成红色胶囊。
+    // 用空格分隔（不用换行）：编辑器的文本模型里 <br> 不占字符，
+    // 换行分隔的 token 在回解析时容易粘连——空格能完整 surviving。
+    insertSkill(name) {
+      const token = `⟦skill:${name}⟧`
+      const cur = stateRef.current.prompt
+      if (cur.includes(token)) return
+      const sep = cur.length === 0 || /[\s]$/.test(cur) ? '' : ' '
+      dispatch({ type: 'set-prompt', value: `${cur}${sep}${token} ` })
+    },
+    setRefs(refs) { dispatch({ type: 'set-refs', refs }) },
+    async runGenerate(promptResolved: string) {
+      // P0 并发互斥（前端同步锁）：dispatch 是同步的，所以这个判断+占位是原子的——
+      // 连点、快捷键重入、React 18 StrictMode 双调用都只会放行第一个。
+      // main 侧还有第二道 busy 锁（防多窗口/未来多入口），此处是主防线。
+      if (stateRef.current.status === 'loading' || stateRef.current.activeRequestId) return
+      const snap = stateRef.current
+      const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      const req: GenerateRequest = {
+        requestId,
+        promptRaw: snap.prompt,
+        promptResolved,
+        params: snap.params,
+        images: snap.refImages.map((r) => r.dataUrl),
+        // 参考图快照随请求发给 main，落盘进历史，回填时可直接恢复
+        refImages: snap.refImages.map((r, i) => ({ ...r, index: i + 1 })),
+      }
+      console.log('[input] promptRaw len=', snap.prompt.length, snap.prompt.slice(0, 200))
+      console.log('[parsedPrompt]', promptResolved.slice(0, 300))
+      console.log('[ipcPayload] requestId=', requestId, 'images=', req.images.length, 'refImages=', req.refImages?.length ?? 0)
+      console.log('[localFile] refs=', snap.refImages.map((r) => ({ name: r.name, bytes: r.bytes, hasData: !!r.dataUrl })).slice(0, 4));
+      console.log('[job] job_id=', requestId, 'enqueue images=', req.images.length);
+      console.assert(snap.refImages.every((r) => !!r.dataUrl), '[localFile] assert dataUrl');
+      if (snap.refImages.length > 0 && snap.refImages.some((r) => !r.dataUrl)) {
+        console.log('[ipcPayload] missing dataUrl/path, intercept');
+        dispatch({ type: 'set-status', status: 'error', error: { code: 'payload', message: '参考图缺失，已拦截（红点）' } })
+        return
+      }
+      if (req.images.some((s) => s.includes('/Users/'))) console.warn('[ipcPayload] contains /Users absolute path, should be file:// or img://')
+      dispatch({ type: 'set-status', status: 'loading', requestId })
+      let r: Awaited<ReturnType<typeof window.api.generate>>
+      try {
+        r = await window.api.generate(req)
+      } catch (e) {
+        dispatch({
+          type: 'set-status',
+          status: 'error',
+          error: { code: 'network', message: e instanceof Error ? e.message : '生成请求失败' },
+        })
+        return
+      }
+      if (r.ok) {
+        // 过期回包保护：等待期间用户可能点了取消（或又发起了新请求），
+        // 此时 activeRequestId 已变化，这个回包直接丢弃，不覆盖当前 UI。
+        if (stateRef.current.activeRequestId !== requestId) return
+        dispatch({ type: 'set-results', results: r.entry.images, entry: r.entry })
+        const h = await window.api.listHistory()
+        dispatch({ type: 'set-history', history: h })
+        dispatch({ type: 'set-status', status: 'idle' })
+      } else if (r.code === 'busy') {
+        // main 侧第二道锁（多窗口等极端路径），前端锁没拦住时才到这里。
+        // 注意：此前已 dispatch loading 占位，必须在此收尾，否则界面转圈卡死、
+        // 且 activeRequestId 一直占着导致后续所有生成都被前端锁拦掉。
+        if (stateRef.current.activeRequestId !== requestId) return
+        dispatch({ type: 'set-status', status: 'error', error: { code: r.code, message: r.message, body: r.body } })
+        return
+      } else {
+        if (stateRef.current.activeRequestId !== requestId) return
+        dispatch({ type: 'set-status', status: 'error', error: { code: r.code, message: r.message, body: r.body } })
+      }
+    },
+    async cancelGenerate() {
+      const requestId = stateRef.current.activeRequestId
+      if (!requestId) return
+      // 先让 main 侧 abort，再把 UI 切到 canceled 状态。
+      // generate() 的 promise 随后也会 resolve（canceled），但此时已不是 loading，
+      // 用 activeRequestId 对账：只处理“仍是同一请求”的回包，过期回包直接丢弃。
+      try {
+        await window.api.cancel(requestId)
+      } catch { /* ignore */ }
+      if (stateRef.current.activeRequestId === requestId) {
+        dispatch({ type: 'set-status', status: 'error', error: { code: 'canceled', message: '已取消生成' } })
+      }
+    },
+    refillFromHistory(h) {
+      dispatch({ type: 'set-prompt', value: h.promptRaw })
+      dispatch({ type: 'set-param', key: 'aspect', value: h.params.aspect })
+      dispatch({ type: 'set-param', key: 'resolution', value: normalizeResolution(h.params.resolution) })
+      // Old history rows (pre-quality field) lack `quality`; fall back to medium.
+      dispatch({ type: 'set-param', key: 'quality', value: normalizeQuality(h.params.quality) })
+      dispatch({ type: 'set-param', key: 'count', value: h.params.count })
+      // 回填参考图快照：老条目没有 refImages 字段时恢复为空，不崩。
+      const refs: RefImage[] = Array.isArray(h.refImages)
+        ? h.refImages.map((r, i) => ({ ...r, index: i + 1 }))
+        : []
+      dispatch({ type: 'set-refs', refs })
+      dispatch({ type: 'set-preview', entry: h })
+      dispatch({ type: 'set-status', status: 'idle', error: undefined })
+    },
+    async refreshHistory() {
+      const h = await window.api.listHistory()
+      dispatch({ type: 'set-history', history: h })
+    },
+    async deleteHistoryEntry(id) {
+      const h = await window.api.deleteHistory(id)
+      dispatch({ type: 'set-history', history: h })
+      // 若删掉的正是当前预览条目，清空预览，避免 PreviewBox 挂着已删除的图片
+      if (stateRef.current.previewEntry?.id === id) {
+        dispatch({ type: 'set-preview', entry: undefined })
+      }
+    },
+    async reloadSettings() {
+      const s = await window.api.getSettings()
+      dispatch({ type: 'set-settings', settings: s })
+    },
+    async setActivePreset(id) {
+      const s = await window.api.setActivePreset(id)
+      dispatch({ type: 'set-settings', settings: s })
+    },
+    async addSkill(input) {
+      const s = await window.api.addSkill(input)
+      dispatch({ type: 'set-settings', settings: s })
+    },
+    async deleteSkill(id) {
+      const s = await window.api.deleteSkill(id)
+      dispatch({ type: 'set-settings', settings: s })
+    },
+    async setPresetModel(id, model) {
+      const target = stateRef.current.settings.presets.find((p) => p.id === id)
+      if (!target) return
+      const trimmed = model.trim()
+      if (!trimmed || trimmed === target.model) return
+      const s = await window.api.updatePreset({ ...target, model: trimmed })
+      dispatch({ type: 'set-settings', settings: s })
+      // 切到老四模型时 xhigh/max 自动钳位到 medium，避免发包被拒、UI 残留高档选中
+      const allowed = getSupportedQualities(trimmed)
+      const curQ = stateRef.current.params.quality
+      if (!(allowed as string[]).includes(curQ) ) dispatch({ type: 'set-param', key: 'quality', value: 'medium' })
+    },
+    async addModel(name) {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      const s = await window.api.addModel(name)
+      dispatch({ type: 'set-settings', settings: s })
+    },
+    async deleteModel(name) {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      // 乐观更新：先本地移除 chip 给即时反馈，失败再 reload 回滚。
+      // 解决“点了 × 界面没变化”的体感问题（尤其 IPC 慢/弹窗被拦时）。
+      const prev = stateRef.current.settings
+      const models = Array.isArray(prev.models) ? prev.models : []
+      if (models.includes(trimmed) && models.length > 1) {
+        dispatch({ type: 'set-settings', settings: { ...prev, models: models.filter((m) => m !== trimmed) } })
+      }
+      try {
+        const s = await window.api.deleteModel(name)
+        dispatch({ type: 'set-settings', settings: s })
+      } catch {
+        const s = await window.api.getSettings()
+        dispatch({ type: 'set-settings', settings: s })
+      }
+    },
+    async saveSettings(patch) {
+      const s = await window.api.saveSettings(patch)
+      dispatch({ type: 'set-settings', settings: s })
+    },
+  }), [state])
+
+  return <ComposerContext.Provider value={api}>{children}</ComposerContext.Provider>
+}
+
+export function useComposer(): ComposerApi {
+  const v = useContext(ComposerContext)
+  if (!v) throw new Error('useComposer must be used inside ComposerProvider')
+  return v
+}
+
+export function useActivePreset(): Preset {
+  const { state } = useComposer()
+  return state.settings.presets.find((p) => p.id === state.settings.activePresetId) ?? state.settings.presets[0]!
+}

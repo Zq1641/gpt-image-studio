@@ -1,0 +1,495 @@
+window_id=162 pid=5812 elements=97 snapshot_id=s00000003
+element_token for row [N] = s00000003:N (row [1] is "s00000003:1")
+
+- [0] AXWindow "gpt-image-2生图工具 — -zsh — 80×24" [id=_NS:136 actions=[raise]]
+    - AXTextArea = "Last login: Fri Nov 13 11:28:02 on console
+pony@qiangdeMacBook-Pro ~ % cd "/Users/pony/gpt-image-2生图工具" && pwd
+/Users/pony/gpt-image-2生图工具
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % mkdir -p src/cli src/mcp && ls src/shared src/main | head -n 30
+src/main:
+api.ts
+history.test.ts
+history.ts
+index.ts
+normalize.test.ts
+normalize.ts
+p0-security.test.ts
+presets.ts
+protocol.ts
+secret.ts
+settings.ts
+
+src/shared:
+ipc.ts
+size.test.ts
+size.ts
+skills.ts
+types.ts
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/main/queue.ts <<'MAUSEOF'
+heredoc> // queue.ts — FIFO串行，三端共用。不重试、不丢弃。
+heredoc> type Task<T> = () => Promise<T>;
+heredoc> export class FifoQueue {
+heredoc>   private tail: Promise<unknown> = Promise.resolve();
+heredoc>   private depth = 0;
+heredoc>   enqueue<T>(task: Task<T>): Promise<T> {
+heredoc>     this.depth += 1;
+heredoc>     const run: Promise<T> = this.tail.then(task, task);
+heredoc>     this.tail = run.catch(() => {});
+heredoc>     return (run.finally(() => { this.depth = Math.max(0, this.depth - 1); }) as Promise<T>);
+heredoc>   }
+heredoc>   pending(): number { return this.depth; }
+heredoc> }
+heredoc> export const generateQueue = new FifoQueue();
+heredoc> MAUSEOF
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % ls -l src/main/queue.ts && cat src/main/queue.ts
+-rw-r--r--  1 pony  staff  546 11 13 11:43 src/main/queue.ts
+// queue.ts — FIFO串行，三端共用。不重试、不丢弃。
+type Task<T> = () => Promise<T>;
+export class FifoQueue {
+  private tail: Promise<unknown> = Promise.resolve();
+  private depth = 0;
+  enqueue<T>(task: Task<T>): Promise<T> {
+    this.depth += 1;
+    const run: Promise<T> = this.tail.then(task, task);
+    this.tail = run.catch(() => {});
+    return (run.finally(() => { this.depth = Math.max(0, this.depth - 1); }) as Promise<T>);
+  }
+  pending(): number { return this.depth; }
+}
+export const generateQueue = new FifoQueue();
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/main/cost.ts <<'MAUSEOF'
+heredoc> // cost.ts — 纯函数：total = pricePerImage * count
+heredoc> export function estimateCost(count: number, pricePerImage: number): number {
+heredoc>   const c = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+heredoc>   const p = Number.isFinite(pricePerImage) ? Math.max(0, pricePerImage) : 0;
+heredoc>   return Math.round(c * p * 10000) / 10000;
+heredoc> }
+heredoc> export function formatCNY(n: number): string {
+heredoc>   return '¥' + (Number.isFinite(n) ? n : 0).toFixed(2);
+heredoc> }
+heredoc> export function costPreview(count: number, pricePerImage: number): string {
+heredoc>   return `${formatCNY(estimateCost(count, pricePerImage))}（${count} 张 x ${formatCNY(pricePerImage)}/张）`;
+heredoc> }
+heredoc> MAUSEOF
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % ls -l src/main/queue.ts src/main/cost.ts
+-rw-r--r--  1 pony  staff  627 11 13 11:45 src/main/cost.ts
+-rw-r--r--  1 pony  staff  546 11 13 11:43 src/main/queue.ts
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/shared/headless-schema.ts <<'MAUSEOF'
+heredoc> // headless-schema.ts — 单核心唯一参数校验 + Body组装
+heredoc> // CLI/MCP/Electron三端唯一入口。只校验不二次封装。
+heredoc> import type { AspectRatio, Count, Quality, Resolution, ImageFieldName, SizeMode } from './types';
+heredoc> import { QUALITY_ALL, getSupportedQualities } from './types';
+heredoc> import { sizeString } from './size';
+heredoc> 
+heredoc> export interface HeadlessInput {
+heredoc>   prompt?: unknown; aspect?: unknown; resolution?: unknown;
+heredoc>   quality?: unknown; count?: unknown; images?: unknown;
+heredoc>   complexity?: unknown; size?: unknown; model?: unknown;
+heredoc> }
+heredoc> export interface HeadlessParams {
+heredoc>   prompt: string; aspect: AspectRatio; resolution: Resolution;
+heredoc>   quality: Quality; count: Count; images: string[];
+heredoc>   complexity?: string; sizeOverride?: string; modelOverride?: string;
+heredoc> }
+heredoc> export interface PresetLike {
+heredoc>   model: string; imageFieldName: ImageFieldName;
+heredoc>   sizeMode: SizeMode; sendAspectRatio: boolean;
+heredoc> }
+heredoc> const ASPECTS: AspectRatio[] = ['21:9','16:9','3:2','4:3','1:1','3:4','2:3','9:16'];
+heredoc> export function isAspect(v: unknown): v is AspectRatio {
+heredoc>   return typeof v === 'string' && (ASPECTS as string[]).includes(v);
+heredoc> }
+heredoc> export function isResolution(v: unknown): v is Resolution {
+heredoc>   if (v === 'auto' || v === '1K' || v === '2K' || v === '4K') return true;
+heredoc>   return typeof v === 'string' && /^\d+x\d+$/.test(v);
+heredoc> }
+heredoc> export function isQuality(v: unknown, model?: string): v is Quality {
+heredoc>   const allowed = model ? getSupportedQualities(model) : QUALITY_ALL;
+heredoc>   return typeof v === 'string' && (allowed as string[]).includes(v);
+heredoc> }
+heredoc> export function isCount(v: unknown): v is Count {
+heredoc>   return v === 1 || v === 2 || v === 3 || v === 4;
+heredoc> }
+heredoc> export function parseHeadlessParams(input: HeadlessInput, model?: string): { ok: true; params: HeadlessParams } | { ok: false; message: string } {
+heredoc>   const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
+heredoc>   if (!prompt) return { ok: false, message: 'prompt 不能为空' };
+heredoc>   if (prompt.length > 8000) return { ok: false, message: 'prompt 超长（限8000字符）' };
+heredoc>   const aspect = input.aspect ?? '1:1';
+heredoc>   if (!isAspect(aspect)) return { ok: false, message: '非法 aspect' };
+heredoc>   const resolution = input.resolution ?? 'auto';
+heredoc>   if (!isResolution(resolution)) return { ok: false, message: '非法 resolution，仅支持 auto/1K/2K/4K/WxH' };
+heredoc>   const m = model ?? (typeof input.model === 'string' ? input.model : undefined);
+heredoc>   const quality = input.quality ?? 'medium';
+heredoc>   if (!isQuality(quality, m)) return { ok: false, message: '非法 quality，老四模型仅 auto/low/medium/high，2.6支持六档' };
+heredoc>   const count = input.count ?? 1;
+heredoc>   if (!isCount(count)) return { ok: false, message: '非法 count，仅支持 1-4' };
+heredoc>   let images: string[] = [];
+heredoc>   if (input.images !== undefined) {
+heredoc>     if (!Array.isArray(input.images)) return { ok: false, message: 'images 必须为 string[]' };
+heredoc>     for (const s of input.images) {
+heredoc>       if (typeof s !== 'string' || s.length === 0) return { ok: false, message: 'images 元素必须非空字符串' };
+heredoc>     }
+heredoc>     images = input.images as string[];
+heredoc>   }
+heredoc>   const out: HeadlessParams = { prompt, aspect, resolution: resolution as Resolution, quality: quality as Quality, count: count as Count, images };
+heredoc>   if (input.complexity !== undefined) {
+heredoc>     if (typeof input.complexity !== 'string' || !input.complexity || input.complexity.length > 64)
+heredoc>       return { ok: false, message: '非法 complexity（透传字符串）' };
+heredoc>     out.complexity = input.complexity;
+heredoc>   }
+heredoc>   if (input.size !== undefined) {
+heredoc>     if (typeof input.size !== 'string' || !input.size || input.size.length > 32)
+heredoc>       return { ok: false, message: '非法 size（透传字符串）' };
+heredoc>     out.sizeOverride = input.size;
+heredoc>   }
+heredoc>   if (typeof input.model === 'string' && input.model.trim()) out.modelOverride = input.model.trim().slice(0, 120);
+heredoc>   return { ok: true, params: out };
+heredoc> }
+heredoc> export function buildImageBody(p: HeadlessParams, preset: PresetLike, promptResolved: string): Record<string, unknown> {
+heredoc>   const model = p.modelOverride || preset.model;
+heredoc>   const body: Record<string, unknown> = { model, prompt: promptResolved, n: p.count };
+heredoc>   if (p.quality !== 'auto') (body as Record<string, unknown>).quality = p.quality;
+heredoc>   const size = p.sizeOverride ?? sizeString(p.aspect, p.resolution, preset.sizeMode);
+heredoc>   if (size) body.size = size;
+heredoc>   if (preset.sendAspectRatio) body.aspect_ratio = p.aspect;
+heredoc>   if (p.complexity !== undefined) body.complexity = p.complexity;
+heredoc>   if (p.images.length > 0) body[preset.imageFieldName] = p.images.length === 1 ? p.images[0] : p.images;
+heredoc>   return body;
+heredoc> }
+heredoc> export function estimatePayloadBytes(images: string[]): number {
+heredoc>   return images.reduce((s, x) => s + Math.floor(x.length * 0.75), 0);
+heredoc> }
+heredoc> MAUSEOF
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % ls -l src/shared/headless-schema.ts src/main/queue.ts src/main/cost.ts
+-rw-r--r--  1 pony  staff   627 11 13 11:45 src/main/cost.ts
+-rw-r--r--  1 pony  staff   546 11 13 11:43 src/main/queue.ts
+-rw-r--r--  1 pony  staff  4657 11 13 11:46 src/shared/headless-schema.ts
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo MAUS_OK_1
+MAUS_OK_1
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo MAUS_OK_2 > .mausbot-probe.txt
+echo MAUS_OK_3 >> .mausbot-probe.txt
+
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo NL_OK > .mausbot-nl.txt
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/cli/gen.ts <<'MAUSEOF'
+heredoc> >....                                                                  
+  const items = extractB64(data)
+  if (items.length === 0) {
+    console.error('ERR 未能从响应中识别到图片数据（b64_json）')
+    process.exitCode = 3
+    return
+  }
+  const outDir = argValue('out') ?? process.env['GPT_IMAGE_OUT'] ?? join(process.cwd(), 'output')
+  mkdirSync(outDir, { recursive: true })
+  const stamp = Date.now()
+  items.forEach((b64, index) => {
+    const file = join(outDir, stamp + '-' + index + '.png')
+    writeFileSync(file, Buffer.from(b64, 'base64'))
+    console.info('saved ' + file)
+  })
+}
+
+main().catch((e: unknown) => {
+  const msg = e instanceof Error ? e.message : String(e)
+  console.error('ERR ' + msg)
+  process.exitCode = 1
+})
+MAUSEOF
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/mcp/server.ts <<'MAUSEOF'
+heredoc> >....                                                                  
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      replyError(null, -32700, 'JSON 解析失败')
+      return
+    }
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        if (item && typeof item === 'object') void handle(item as Record<string, unknown>)
+      }
+      return
+    }
+    if (parsed && typeof parsed === 'object') void handle(parsed as Record<string, unknown>)
+  })
+  rl.on('close', () => {
+    process.exit(0)
+  })
+}
+
+main()
+MAUSEOF
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/main/headless.test.ts <<'MAUSEOF'
+heredoc> >....                                                                  
+
+  it('队内任务抛错不阻塞后续任务', async () => {
+    const q = new FifoQueue()
+    const bad = q.enqueue(async () => {
+      throw new Error('boom')
+    })
+    await expect(bad).rejects.toThrow('boom')
+    const good = await q.enqueue(async () => 42)
+    expect(good).toBe(42)
+    expect(q.pending()).toBe(0)
+  })
+
+  it('入队后 pending 计数可见', async () => {
+    const q = new FifoQueue()
+    const t = q.enqueue(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+    expect(q.pending()).toBe(1)
+    await t
+    expect(q.pending()).toBe(0)
+  })
+})
+MAUSEOF
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cp -p src/main/api.ts ./api.ts.bak-$(date +%m%d-%H%M%S) && ls -1 api.ts.bak-*
+api.ts.bak-1113-132030
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/main/api.ts <<'MAUSEOF'
+heredoc> >....                                                                  
+      const bodyStr = typeof data === 'string' ? data : (() => { try { return JSON.stringify(data) } catch { return String(data) } })()
+      return { ok: false, code: 'http', status, message: `HTTP ${status}`, body: bodySnippet(bodyStr) }
+    }
+    return { ok: false, code: 'network', message: ax.message || '网络错误' }
+  } finally {
+    CONTROLLERS.delete(req.requestId)
+    if (activeRequestId === req.requestId) activeRequestId = null
+  }
+}
+
+export function cancel(requestId: string): void {
+  const c = CONTROLLERS.get(requestId)
+  if (c) {
+    c.abort()
+    CONTROLLERS.delete(requestId)
+  }
+  // abort 后 axios 的 catch/finally 会清锁；这里顺手清一下，防“cancel 发了但
+  // 请求还没真正抛错”的窗口期里 busy 误杀下一个请求。
+  if (activeRequestId === requestId) activeRequestId = null
+}
+MAUSEOF
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cp -p tsconfig.node.json ./tsconfig.node.json.bak-$(date +%m%d-%H%M%S) && cat > tsconfig.node.json <<'MAUSEOF'
+cmdand heredoc> >....                                                           
+    "lib": ["es2022"],
+    "types": ["node", "electron-vite/node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["src/shared/*"]
+    }
+  },
+  "include": [
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*",
+    "src/cli/**/*",
+    "src/mcp/**/*",
+    "electron.vite.config.ts"
+  ]
+}
+MAUSEOF
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % rm -f .mausbot-probe.txt .mausbot-nl.txt; npm run typecheck > .mausbot-typecheck.log 2>&1; echo EXIT=$?
+EXIT=0
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % npm run typecheck > .mausbot-typecheck.log 2>&1; echo "EXIT=$?" >> .mausbot-typecheck.log; npm run test > .mausbot-test.log 2>&1; echo "EXIT=$?" >> .mausbot-test.log
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % npm run dist:mac > .mausbot-dist.log 2>&1; echo "EXIT=$?" >> .mausbot-dist.log
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run dist:mac > .mausbot-dist2.log 2>&1; echo "EXIT=$?" >> .mausbot-dist2.log
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cp -p package.json ./package.json.bak-$(date +%m%d-%H%M%S) && node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));Object.assign(p.scripts,{'build:cli':'esbuild src/cli/gen.ts --bundle --platform=node --format=cjs --target=node18 --outfile=dist-cli/gen.cjs','build:mcp':'esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --target=node18 --outfile=dist-cli/mcp.cjs','gen':'node dist-cli/gen.cjs','mcp':'node dist-cli/mcp.cjs'});fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')" && npm run build:cli --silent && npm run build:mcp --silent && node dist-cli/gen.cjs --prompt "一只橘猫坐在窗台上，柔光" --quality high --aspect 16:9 --count 2 --dry-run > .mausbot-cli.log 2>&1; echo "EXIT=$?" >> .mausbot-cli.log
+
+
+  dist-cli/gen.cjs  504.1kb
+
+⚡ Done in 21ms
+
+  dist-cli/mcp.cjs  507.8kb
+
+⚡ Done in 13ms
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | node dist-cli/mcp.cjs > .mausbot-mcp.log 2>&1; echo "EXIT=$?" >> .mausbot-mcp.log
+
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % npm run typecheck > .mausbot-final.log 2>&1; echo "TYPECHECK_EXIT=$?" >> .mausbot-final.log; npm run test >> .mausbot-final.log 2>&1; echo "TEST_EXIT=$?" >> .mausbot-final.log
+
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo HELLO_PIXEL
+HELLO_PIXEL
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % pwd && git -C "/Users/pony/gpt-image-2生图工具" status --short | head -n 30
+/Users/pony/gpt-image-2生图工具
+ M CHANGELOG.md
+ M README.md
+ M docs/LAUNCH-KIT.md
+ M package-lock.json
+ M package.json
+ M src/main/api.ts
+ M src/main/history.ts
+ M src/main/index.ts
+ M src/main/normalize.ts
+ M src/main/presets.ts
+ M src/main/settings.ts
+ M src/preload/index.ts
+ M src/renderer/App.tsx
+ M src/renderer/components/GenerateButton.tsx
+ M src/renderer/components/HistoryPanel.tsx
+ M src/renderer/components/MainPane.tsx
+ M src/renderer/components/ModelDisplay.tsx
+ M src/renderer/components/PreviewBox.tsx
+ M src/renderer/components/PromptEditor.tsx
+ M src/renderer/components/ResolutionSegments.tsx
+ M src/renderer/components/SettingsModal.tsx
+ M src/renderer/data/templates.ts
+ M src/renderer/index.html
+ M src/renderer/state/useComposer.tsx
+ M src/renderer/styles/controls.css
+ M src/renderer/styles/layout.css
+ M src/renderer/styles/results.css
+ M src/shared/ipc.ts
+ M src/shared/size.ts
+ M src/shared/types.ts
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % node -e "const fs=require('fs');let p='src/shared/types.ts';let s=fs.readFileSync(p,'utf8');s=s.replace(/export type Resolution = .*/,\"export type Resolution = 'auto' | '1K' | '2K' | '4K' | '6K' | '8K' | \`\${number}x\${number}\`\");s=s.replace(/if \(r === 'auto' \|\| r === '1K' \|\| r === '2K' \|\| r === '4K'\)/,\"if (r === 'auto' || r === '1K' || r === '2K' || r === '4K' || r === '6K' || r === '8K')\");fs.writeFileSync(p,s);console.log('types patched',s.length)"
+types patched 5184
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % node -e "const fs=require('fs');let s=fs.readFileSync('src/shared/size.ts','utf8');s=s.replace(/const LONG_EDGE[^}]*}/,\"const LONG_EDGE: Record<string, number> = { '1K': 1024, '2K': 2048, '4K': 4096, '6K': 6144, '8K': 8192 }\");console.log(/6K/.test(s)?'size ok':'size MISS');fs.writeFileSync('src/shared/size.ts',s)" && node -e "const fs=require('fs');let s=fs.readFileSync('src/shared/headless-schema.ts','utf8');s=s.replace(/if \(v === 'auto' \|\| v === '1K' \|\| v === '2K' \|\| v === '4K'\)/,\"if (v === 'auto' || v === '1K' || v === '2K' || v === '4K' || v === '6K' || v === '8K')\");s=s.replace(/auto\/1K\/2K\/4K\/WxH/,\"auto/1K/2K/4K/6K/8K/WxH\");fs.writeFileSync('src/shared/headless-schema.ts',s);console.log('schema ok')"
+size ok
+schema ok
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > /tmp/p1.mjs <<'MAUSEOF'
+heredoc> import fs from 'node:fs';
+heredoc> let p='src/renderer/components/ResolutionSegments.tsx';
+heredoc> let s=fs.readFileSync(p,'utf8');
+heredoc> s=s.replace("const SIZE_BASE: Resolution[] = ['auto', '1K', '2K', '4K']","const SIZE_BASE: Resolution[] = ['auto', '1K', '2K', '4K', '6K', '8K']");
+heredoc> fs.writeFileSync(p,s);
+heredoc> console.log('rs patched', s.length, /6K/.test(s)?'has6K':'no6K');
+heredoc> MAUSEOF
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % node /tmp/p1.mjs
+rs patched 2745 has6K
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo HELLO2
+HELLO2
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo PX_OK
+PX_OK
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % 
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % npm run typecheck:web 2>&1 | tail -n 20; echo TYPECHECK_EXIT=$?
+
+> gpt-image-studio@0.2.0 typecheck:web
+> tsc --noEmit -p tsconfig.web.json
+
+TYPECHECK_EXIT=0
+pony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > /tmp/maus_patch.mjs <<'MAUSEOF'
+heredoc> 
+heredoc> >....                                                                  
+t', req.requestId)","console.log('[generate] dequeue start', req.requestId)\n    console.log('[job] start job_id=', req.requestId, 'model=', preset.model, 'count=', req.params.count);\n    console.log('[file] protocol check images=', req.images.length, 'job_id=', req.requestId);\n    let lastErr: unknown = null;\n    for (let attempt = 1; attempt <= 3; attempt++) {\n      console.log('[job] attempt', attempt + '/3', req.requestId);");}
+if(!s.includes('已重试3次')){s=s.replace("console.log('[generate] network error', req.requestId, ax.message)\n      return { ok: false, code: 'network', message: ax.message || '网络错误' }","console.log('[generate] network error', req.requestId, ax.message)\n      lastErr = ax;\n      if ((ax as any).code === 'ECONNABORTED' || !(ax as any).response) {\n        console.log('[job] retry', req.requestId, 'attempt', attempt);\n        continue;\n      }\n      return { ok: false, code: 'network', message: ax.message || '网络错误' }\n    }\n    }\n    return { ok: false, code: 'network', message: (lastErr as Error)?.message || '网络错误 （已重试3次）' };");}
+return s;});
+patch('src/renderer/styles/layout.css',s=>{
+if(!s.includes('P1-6左栏')){s=s.replace('.sidebar-section {','/* P1-6左栏等隙对 齐左线：gap统一12px，不改配色/字体 */\n.sidebar-section {');}
+if(s.includes('gap: 10px;')){s=s.replace('gap: 10px;','gap: 12px;');}
+return s;});
+console.log('ALL_DONE');" (Shell)
+    - [1] AXButton (拆分面板) [help="拆分面板" actions=[press]]
+      - [2] AXButton [actions=[press]]
+      - [3] AXButton [actions=[press]]
+      - [4] AXButton [actions=[press]]
+      - [5] AXButton [actions=[press]]
+  - [6] AXButton [actions=[press]]
+  - [7] AXButton [help="此按钮也可以执行缩放窗口的操作" actions=[press,zoomwindow]]
+  - [8] AXButton [actions=[press]]
+  - AXImage "gpt-image-2生图工具"
+- [9] AXMenuBar [id=_NS:177 actions=[cancel]] (menus collapsed: run an item with invoke_menu path, or pass query to search menu items)
+  - [10] AXMenuBarItem "Apple" [actions=[cancel,press,pick]]
+    - [11] AXMenu [actions=[cancel]]
+      - [12] AXMenuItem "关于本机" [id=_aboutThisMacRequested: actions=[cancel,press,pick]]
+      - [13] AXMenuItem "系统信息" [id=_systemInformationRequested: actions=[cancel,press,pick]]
+      - [14] AXMenuItem [enabled=false actions=[cancel,press,pick]]
+      - [15] AXMenuItem "系统设置…，1项更新" [id=_systemSettingsRequested: actions=[cancel,press,pick]]
+      - [16] AXMenuItem "位置" [id=_locationRequested: actions=[cancel,press,pick]]
+        - [17] AXMenu [actions=[cancel]]
+          - [18] AXMenuItem "111" [id=_networkLocationSwitchRequested: actions=[cancel,press,pick]]
+          - [19] AXMenuItem "0410" [id=_networkLocationSwitchRequested: actions=[cancel,press,pick]]
+          - [20] AXMenuItem "0509" [id=_networkLocationSwitchRequested: actions=[cancel,press,pick]]
+          - [21] AXMenuItem "0912" [id=_networkLocationSwitchRequested: actions=[cancel,press,pick]]
+          - [22] AXMenuItem "自动" [id=_networkLocationSwitchRequested: actions=[cancel,press,pick]]
+          - [23] AXMenuItem [enabled=false actions=[cancel,press,pick]]
+          - [24] AXMenuItem "网络设置…" [id=_networkPreferencesRequested: actions=[cancel,press,pick]]
+      - [25] AXMenuItem "App Store" [id=_appStoreRequested: actions=[cancel,press,pick]]
+      - [26] AXMenuItem [enabled=false actions=[cancel,press,pick]]
+      - [27] AXMenuItem "最近使用的项目" [id=_recentsRequested: actions=[cancel,press,pick]]
+        - [28] AXMenu [actions=[cancel]]
+          - [29] AXMenuItem "应用程序" [enabled=false actions=[cancel,press,pick]]
+          - [30] AXMenuItem "播客.app" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [31] AXMenuItem "在访达中显示“播客.app”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [32] AXMenuItem "归档实用工具.app" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [33] AXMenuItem "在访达中显示“归档实用工具.app”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [34] AXMenuItem "腾讯会议.app" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [35] AXMenuItem "在访达中显示“腾讯会议.app”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [36] AXMenuItem "微信.app" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [37] AXMenuItem "在访达中显示“微信.app”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [38] AXMenuItem "系统设置.app" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [39] AXMenuItem "在访达中显示“系统设置.app”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [40] AXMenuItem "Command Code.app" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [41] AXMenuItem "在访达中显示“Command Code.app”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [42] AXMenuItem "Google Chrome.app" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [43] AXMenuItem "在访达中显示“Google Chrome.app”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [44] AXMenuItem "GPT Image.app" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [45] AXMenuItem "在访达中显示“GPT Image.app”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [46] AXMenuItem "OpenMausBot.app" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [47] AXMenuItem "在访达中显示“OpenMausBot.app”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [48] AXMenuItem "WPS Office.app" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [49] AXMenuItem "在访达中显示“WPS Office.app”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [50] AXMenuItem [enabled=false actions=[cancel,press,pick]]
+          - [51] AXMenuItem "文稿" [enabled=false actions=[cancel,press,pick]]
+          - [52] AXMenuItem "0819剧本创作skill" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [53] AXMenuItem "在访达中显示“0819剧本创作skill”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [54] AXMenuItem "0825影视配乐创作skill" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [55] AXMenuItem "在访达中显示“0825影视配乐创作skill”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [56] AXMenuItem "2026-09-12-agent-browser-mvp.md" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [57] AXMenuItem "在访达中显示“2026-09-12-agent-browser-mvp.md”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [58] AXMenuItem "2026-11-10_手机TVC_30s" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [59] AXMenuItem "在访达中显示“2026-11-10_手机TVC_30s”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [60] AXMenuItem "欧洲品牌" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [61] AXMenuItem "在访达中显示“欧洲品牌”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [62] AXMenuItem "石猴出海" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [63] AXMenuItem "在访达中显示“石猴出海”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [64] AXMenuItem "CLAUDE CODE" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [65] AXMenuItem "在访达中显示“CLAUDE CODE”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [66] AXMenuItem "DS-160-中文全译-面签核对版.md" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [67] AXMenuItem "在访达中显示“DS-160-中文全译-面签核对版.md”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [68] AXMenuItem "gpt-image-2生图工具" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [69] AXMenuItem "在访达中显示“gpt-image-2生图工具”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [70] AXMenuItem "MCP-SETUP.md" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [71] AXMenuItem "在访达中显示“MCP-SETUP.md”" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [72] AXMenuItem [enabled=false actions=[cancel,press,pick]]
+          - [73] AXMenuItem "服务器" [enabled=false actions=[cancel,press,pick]]
+          - [74] AXMenuItem "Macintosh HD" [id=_recentItemRequested: actions=[cancel,press,pick]]
+          - [75] AXMenuItem [enabled=false actions=[cancel,press,pick]]
+          - [76] AXMenuItem "清除菜单" [id=_clearRecentItemsRequested: actions=[cancel,press,pick]]
+      - [77] AXMenuItem [enabled=false actions=[cancel,press,pick]]
+      - [78] AXMenuItem "强制退出…" [id=_forceQuitPanelRequested: actions=[cancel,press,pick]]
+      - [79] AXMenuItem "强制退出“终端”" [id=_forceQuitRequested: actions=[cancel,press,pick]]
+      - [80] AXMenuItem [enabled=false actions=[cancel,press,pick]]
+      - [81] AXMenuItem "睡眠" [id=_sleepRequested: actions=[cancel,press,pick]]
+      - [82] AXMenuItem "重新启动…" [id=_restartRequested: actions=[cancel,press,pick]]
+      - [83] AXMenuItem "重新启动" [id=_restartNowRequested: actions=[cancel,press,pick]]
+      - [84] AXMenuItem "关机…" [id=_shutDownRequested: actions=[cancel,press,pick]]
+      - [85] AXMenuItem "关机" [id=_shutDownNowRequested: actions=[cancel,press,pick]]
+      - [86] AXMenuItem [enabled=false actions=[cancel,press,pick]]
+      - [87] AXMenuItem "锁定屏幕" [id=_lockScreenRequested: actions=[cancel,press,pick]]
+      - [88] AXMenuItem "退出登录“qiang zeng”…" [id=_logOutRequested: actions=[cancel,press,pick]]
+      - [89] AXMenuItem "退出登录“qiang zeng”" [id=_logOutNowRequested: actions=[cancel,press,pick]]
+      - [90] AXMenuItem [enabled=false actions=[cancel,press,pick]]
+  - [91] AXMenuBarItem "终端" [id=_NS:1148 actions=[cancel,press,pick]]
+  - [92] AXMenuBarItem "Shell" [id=_NS:1161 actions=[cancel,press,pick]]
+  - [93] AXMenuBarItem "编辑" [id=_NS:1174 actions=[cancel,press,pick]]
+  - [94] AXMenuBarItem "显示" [id=_NS:1221 actions=[cancel,press,pick]]
+  - [95] AXMenuBarItem "窗口" [id=_NS:1236 actions=[cancel,press,pick]]
+  - [96] AXMenuBarItem "帮助" [id=_NS:176 actions=[cancel,press,pick]]
+
+Invalidated snapshots s00000002: their element_tokens are stale.
+{"app_name":"终端","element_count":97,"elements_complete":false,"invalidated_snapshot_ids":["s00000002"],"pid":5812,"returned_element_count":97,"snapshot_id":"s00000003","timeout_ms":1000,"total_element_count":97,"tree_format":"markdown","tree_markdown":"- [0] AXWindow \"gpt-image-2生图工具 — -zsh — 80×24\" [id=_NS:136 actions=[raise]]\n    - AXTextArea = \"Last login: Fri Nov 13 11:28:02 on console\npony@qiangdeMacBook-Pro ~ % cd \"/Users/pony/gpt-image-2生图工具\" && pwd\n/Users/pony/gpt-image-2生图工具\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % mkdir -p src/cli src/mcp && ls src/shared src/main | head -n 30\nsrc/main:\napi.ts\nhistory.test.ts\nhistory.ts\nindex.ts\nnormalize.test.ts\nnormalize.ts\np0-security.test.ts\npresets.ts\nprotocol.ts\nsecret.ts\nsettings.ts\n\nsrc/shared:\nipc.ts\nsize.test.ts\nsize.ts\nskills.ts\ntypes.ts\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/main/queue.ts <<'MAUSEOF'\nheredoc> // queue.ts — FIFO串行，三端共用。不重试、不丢弃。\nheredoc> type Task<T> = () => Promise<T>;\nheredoc> export class FifoQueue {\nheredoc>   private tail: Promise<unknown> = Promise.resolve();\nheredoc>   private depth = 0;\nheredoc>   enqueue<T>(task: Task<T>): Promise<T> {\nheredoc>     this.depth += 1;\nheredoc>     const run: Promise<T> = this.tail.then(task, task);\nheredoc>     this.tail = run.catch(() => {});\nheredoc>     return (run.finally(() => { this.depth = Math.max(0, this.depth - 1); }) as Promise<T>);\nheredoc>   }\nheredoc>   pending(): number { return this.depth; }\nheredoc> }\nheredoc> export const generateQueue = new FifoQueue();\nheredoc> MAUSEOF\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % ls -l src/main/queue.ts && cat src/main/queue.ts\n-rw-r--r--  1 pony  staff  546 11 13 11:43 src/main/queue.ts\n// queue.ts — FIFO串行，三端共用。不重试、不丢弃。\ntype Task<T> = () => Promise<T>;\nexport class FifoQueue {\n  private tail: Promise<unknown> = Promise.resolve();\n  private depth = 0;\n  enqueue<T>(task: Task<T>): Promise<T> {\n    this.depth += 1;\n    const run: Promise<T> = this.tail.then(task, task);\n    this.tail = run.catch(() => {});\n    return (run.finally(() => { this.depth = Math.max(0, this.depth - 1); }) as Promise<T>);\n  }\n  pending(): number { return this.depth; }\n}\nexport const generateQueue = new FifoQueue();\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/main/cost.ts <<'MAUSEOF'\nheredoc> // cost.ts — 纯函数：total = pricePerImage * count\nheredoc> export function estimateCost(count: number, pricePerImage: number): number {\nheredoc>   const c = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;\nheredoc>   const p = Number.isFinite(pricePerImage) ? Math.max(0, pricePerImage) : 0;\nheredoc>   return Math.round(c * p * 10000) / 10000;\nheredoc> }\nheredoc> export function formatCNY(n: number): string {\nheredoc>   return '¥' + (Number.isFinite(n) ? n : 0).toFixed(2);\nheredoc> }\nheredoc> export function costPreview(count: number, pricePerImage: number): string {\nheredoc>   return `${formatCNY(estimateCost(count, pricePerImage))}（${count} 张 x ${formatCNY(pricePerImage)}/张）`;\nheredoc> }\nheredoc> MAUSEOF\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % ls -l src/main/queue.ts src/main/cost.ts\n-rw-r--r--  1 pony  staff  627 11 13 11:45 src/main/cost.ts\n-rw-r--r--  1 pony  staff  546 11 13 11:43 src/main/queue.ts\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/shared/headless-schema.ts <<'MAUSEOF'\nheredoc> // headless-schema.ts — 单核心唯一参数校验 + Body组装\nheredoc> // CLI/MCP/Electron三端唯一入口。只校验不二次封装。\nheredoc> import type { AspectRatio, Count, Quality, Resolution, ImageFieldName, SizeMode } from './types';\nheredoc> import { QUALITY_ALL, getSupportedQualities } from './types';\nheredoc> import { sizeString } from './size';\nheredoc> \nheredoc> export interface HeadlessInput {\nheredoc>   prompt?: unknown; aspect?: unknown; resolution?: unknown;\nheredoc>   quality?: unknown; count?: unknown; images?: unknown;\nheredoc>   complexity?: unknown; size?: unknown; model?: unknown;\nheredoc> }\nheredoc> export interface HeadlessParams {\nheredoc>   prompt: string; aspect: AspectRatio; resolution: Resolution;\nheredoc>   quality: Quality; count: Count; images: string[];\nheredoc>   complexity?: string; sizeOverride?: string; modelOverride?: string;\nheredoc> }\nheredoc> export interface PresetLike {\nheredoc>   model: string; imageFieldName: ImageFieldName;\nheredoc>   sizeMode: SizeMode; sendAspectRatio: boolean;\nheredoc> }\nheredoc> const ASPECTS: AspectRatio[] = ['21:9','16:9','3:2','4:3','1:1','3:4','2:3','9:16'];\nheredoc> export function isAspect(v: unknown): v is AspectRatio {\nheredoc>   return typeof v === 'string' && (ASPECTS as string[]).includes(v);\nheredoc> }\nheredoc> export function isResolution(v: unknown): v is Resolution {\nheredoc>   if (v === 'auto' || v === '1K' || v === '2K' || v === '4K') return true;\nheredoc>   return typeof v === 'string' && /^\\d+x\\d+$/.test(v);\nheredoc> }\nheredoc> export function isQuality(v: unknown, model?: string): v is Quality {\nheredoc>   const allowed = model ? getSupportedQualities(model) : QUALITY_ALL;\nheredoc>   return typeof v === 'string' && (allowed as string[]).includes(v);\nheredoc> }\nheredoc> export function isCount(v: unknown): v is Count {\nheredoc>   return v === 1 || v === 2 || v === 3 || v === 4;\nheredoc> }\nheredoc> export function parseHeadlessParams(input: HeadlessInput, model?: string): { ok: true; params: HeadlessParams } | { ok: false; message: string } {\nheredoc>   const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';\nheredoc>   if (!prompt) return { ok: false, message: 'prompt 不能为空' };\nheredoc>   if (prompt.length > 8000) return { ok: false, message: 'prompt 超长（限8000字符）' };\nheredoc>   const aspect = input.aspect ?? '1:1';\nheredoc>   if (!isAspect(aspect)) return { ok: false, message: '非法 aspect' };\nheredoc>   const resolution = input.resolution ?? 'auto';\nheredoc>   if (!isResolution(resolution)) return { ok: false, message: '非法 resolution，仅支持 auto/1K/2K/4K/WxH' };\nheredoc>   const m = model ?? (typeof input.model === 'string' ? input.model : undefined);\nheredoc>   const quality = input.quality ?? 'medium';\nheredoc>   if (!isQuality(quality, m)) return { ok: false, message: '非法 quality，老四模型仅 auto/low/medium/high，2.6支持六档' };\nheredoc>   const count = input.count ?? 1;\nheredoc>   if (!isCount(count)) return { ok: false, message: '非法 count，仅支持 1-4' };\nheredoc>   let images: string[] = [];\nheredoc>   if (input.images !== undefined) {\nheredoc>     if (!Array.isArray(input.images)) return { ok: false, message: 'images 必须为 string[]' };\nheredoc>     for (const s of input.images) {\nheredoc>       if (typeof s !== 'string' || s.length === 0) return { ok: false, message: 'images 元素必须非空字符串' };\nheredoc>     }\nheredoc>     images = input.images as string[];\nheredoc>   }\nheredoc>   const out: HeadlessParams = { prompt, aspect, resolution: resolution as Resolution, quality: quality as Quality, count: count as Count, images };\nheredoc>   if (input.complexity !== undefined) {\nheredoc>     if (typeof input.complexity !== 'string' || !input.complexity || input.complexity.length > 64)\nheredoc>       return { ok: false, message: '非法 complexity（透传字符串）' };\nheredoc>     out.complexity = input.complexity;\nheredoc>   }\nheredoc>   if (input.size !== undefined) {\nheredoc>     if (typeof input.size !== 'string' || !input.size || input.size.length > 32)\nheredoc>       return { ok: false, message: '非法 size（透传字符串）' };\nheredoc>     out.sizeOverride = input.size;\nheredoc>   }\nheredoc>   if (typeof input.model === 'string' && input.model.trim()) out.modelOverride = input.model.trim().slice(0, 120);\nheredoc>   return { ok: true, params: out };\nheredoc> }\nheredoc> export function buildImageBody(p: HeadlessParams, preset: PresetLike, promptResolved: string): Record<string, unknown> {\nheredoc>   const model = p.modelOverride || preset.model;\nheredoc>   const body: Record<string, unknown> = { model, prompt: promptResolved, n: p.count };\nheredoc>   if (p.quality !== 'auto') (body as Record<string, unknown>).quality = p.quality;\nheredoc>   const size = p.sizeOverride ?? sizeString(p.aspect, p.resolution, preset.sizeMode);\nheredoc>   if (size) body.size = size;\nheredoc>   if (preset.sendAspectRatio) body.aspect_ratio = p.aspect;\nheredoc>   if (p.complexity !== undefined) body.complexity = p.complexity;\nheredoc>   if (p.images.length > 0) body[preset.imageFieldName] = p.images.length === 1 ? p.images[0] : p.images;\nheredoc>   return body;\nheredoc> }\nheredoc> export function estimatePayloadBytes(images: string[]): number {\nheredoc>   return images.reduce((s, x) => s + Math.floor(x.length * 0.75), 0);\nheredoc> }\nheredoc> MAUSEOF\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % ls -l src/shared/headless-schema.ts src/main/queue.ts src/main/cost.ts\n-rw-r--r--  1 pony  staff   627 11 13 11:45 src/main/cost.ts\n-rw-r--r--  1 pony  staff   546 11 13 11:43 src/main/queue.ts\n-rw-r--r--  1 pony  staff  4657 11 13 11:46 src/shared/headless-schema.ts\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo MAUS_OK_1\nMAUS_OK_1\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo MAUS_OK_2 > .mausbot-probe.txt\necho MAUS_OK_3 >> .mausbot-probe.txt\n\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo NL_OK > .mausbot-nl.txt\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/cli/gen.ts <<'MAUSEOF'\nheredoc> >....                                                                  \n  const items = extractB64(data)\n  if (items.length === 0) {\n    console.error('ERR 未能从响应中识别到图片数据（b64_json）')\n    process.exitCode = 3\n    return\n  }\n  const outDir = argValue('out') ?? process.env['GPT_IMAGE_OUT'] ?? join(process.cwd(), 'output')\n  mkdirSync(outDir, { recursive: true })\n  const stamp = Date.now()\n  items.forEach((b64, index) => {\n    const file = join(outDir, stamp + '-' + index + '.png')\n    writeFileSync(file, Buffer.from(b64, 'base64'))\n    console.info('saved ' + file)\n  })\n}\n\nmain().catch((e: unknown) => {\n  const msg = e instanceof Error ? e.message : String(e)\n  console.error('ERR ' + msg)\n  process.exitCode = 1\n})\nMAUSEOF\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/mcp/server.ts <<'MAUSEOF'\nheredoc> >....                                                                  \n    try {\n      parsed = JSON.parse(text)\n    } catch {\n      replyError(null, -32700, 'JSON 解析失败')\n      return\n    }\n    if (Array.isArray(parsed)) {\n      for (const item of parsed) {\n        if (item && typeof item === 'object') void handle(item as Record<string, unknown>)\n      }\n      return\n    }\n    if (parsed && typeof parsed === 'object') void handle(parsed as Record<string, unknown>)\n  })\n  rl.on('close', () => {\n    process.exit(0)\n  })\n}\n\nmain()\nMAUSEOF\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/main/headless.test.ts <<'MAUSEOF'\nheredoc> >....                                                                  \n\n  it('队内任务抛错不阻塞后续任务', async () => {\n    const q = new FifoQueue()\n    const bad = q.enqueue(async () => {\n      throw new Error('boom')\n    })\n    await expect(bad).rejects.toThrow('boom')\n    const good = await q.enqueue(async () => 42)\n    expect(good).toBe(42)\n    expect(q.pending()).toBe(0)\n  })\n\n  it('入队后 pending 计数可见', async () => {\n    const q = new FifoQueue()\n    const t = q.enqueue(async () => {\n      await new Promise((resolve) => setTimeout(resolve, 10))\n    })\n    expect(q.pending()).toBe(1)\n    await t\n    expect(q.pending()).toBe(0)\n  })\n})\nMAUSEOF\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cp -p src/main/api.ts ./api.ts.bak-$(date +%m%d-%H%M%S) && ls -1 api.ts.bak-*\napi.ts.bak-1113-132030\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > src/main/api.ts <<'MAUSEOF'\nheredoc> >....                                                                  \n      const bodyStr = typeof data === 'string' ? data : (() => { try { return JSON.stringify(data) } catch { return String(data) } })()\n      return { ok: false, code: 'http', status, message: `HTTP ${status}`, body: bodySnippet(bodyStr) }\n    }\n    return { ok: false, code: 'network', message: ax.message || '网络错误' }\n  } finally {\n    CONTROLLERS.delete(req.requestId)\n    if (activeRequestId === req.requestId) activeRequestId = null\n  }\n}\n\nexport function cancel(requestId: string): void {\n  const c = CONTROLLERS.get(requestId)\n  if (c) {\n    c.abort()\n    CONTROLLERS.delete(requestId)\n  }\n  // abort 后 axios 的 catch/finally 会清锁；这里顺手清一下，防“cancel 发了但\n  // 请求还没真正抛错”的窗口期里 busy 误杀下一个请求。\n  if (activeRequestId === requestId) activeRequestId = null\n}\nMAUSEOF\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cp -p tsconfig.node.json ./tsconfig.node.json.bak-$(date +%m%d-%H%M%S) && cat > tsconfig.node.json <<'MAUSEOF'\ncmdand heredoc> >....                                                           \n    \"lib\": [\"es2022\"],\n    \"types\": [\"node\", \"electron-vite/node\"],\n    \"strict\": true,\n    \"noUncheckedIndexedAccess\": true,\n    \"skipLibCheck\": true,\n    \"esModuleInterop\": true,\n    \"resolveJsonModule\": true,\n    \"isolatedModules\": true,\n    \"baseUrl\": \".\",\n    \"paths\": {\n      \"@shared/*\": [\"src/shared/*\"]\n    }\n  },\n  \"include\": [\n    \"src/main/**/*\",\n    \"src/preload/**/*\",\n    \"src/shared/**/*\",\n    \"src/cli/**/*\",\n    \"src/mcp/**/*\",\n    \"electron.vite.config.ts\"\n  ]\n}\nMAUSEOF\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % rm -f .mausbot-probe.txt .mausbot-nl.txt; npm run typecheck > .mausbot-typecheck.log 2>&1; echo EXIT=$?\nEXIT=0\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % npm run typecheck > .mausbot-typecheck.log 2>&1; echo \"EXIT=$?\" >> .mausbot-typecheck.log; npm run test > .mausbot-test.log 2>&1; echo \"EXIT=$?\" >> .mausbot-test.log\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % npm run dist:mac > .mausbot-dist.log 2>&1; echo \"EXIT=$?\" >> .mausbot-dist.log\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run dist:mac > .mausbot-dist2.log 2>&1; echo \"EXIT=$?\" >> .mausbot-dist2.log\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cp -p package.json ./package.json.bak-$(date +%m%d-%H%M%S) && node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));Object.assign(p.scripts,{'build:cli':'esbuild src/cli/gen.ts --bundle --platform=node --format=cjs --target=node18 --outfile=dist-cli/gen.cjs','build:mcp':'esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --target=node18 --outfile=dist-cli/mcp.cjs','gen':'node dist-cli/gen.cjs','mcp':'node dist-cli/mcp.cjs'});fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n')\" && npm run build:cli --silent && npm run build:mcp --silent && node dist-cli/gen.cjs --prompt \"一只橘猫坐在窗台上，柔光\" --quality high --aspect 16:9 --count 2 --dry-run > .mausbot-cli.log 2>&1; echo \"EXIT=$?\" >> .mausbot-cli.log\n\n\n  dist-cli/gen.cjs  504.1kb\n\n⚡ Done in 21ms\n\n  dist-cli/mcp.cjs  507.8kb\n\n⚡ Done in 13ms\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"probe\",\"version\":\"0\"}}}' '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}' | node dist-cli/mcp.cjs > .mausbot-mcp.log 2>&1; echo \"EXIT=$?\" >> .mausbot-mcp.log\n\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % npm run typecheck > .mausbot-final.log 2>&1; echo \"TYPECHECK_EXIT=$?\" >> .mausbot-final.log; npm run test >> .mausbot-final.log 2>&1; echo \"TEST_EXIT=$?\" >> .mausbot-final.log\n\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo HELLO_PIXEL\nHELLO_PIXEL\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % pwd && git -C \"/Users/pony/gpt-image-2生图工具\" status --short | head -n 30\n/Users/pony/gpt-image-2生图工具\n M CHANGELOG.md\n M README.md\n M docs/LAUNCH-KIT.md\n M package-lock.json\n M package.json\n M src/main/api.ts\n M src/main/history.ts\n M src/main/index.ts\n M src/main/normalize.ts\n M src/main/presets.ts\n M src/main/settings.ts\n M src/preload/index.ts\n M src/renderer/App.tsx\n M src/renderer/components/GenerateButton.tsx\n M src/renderer/components/HistoryPanel.tsx\n M src/renderer/components/MainPane.tsx\n M src/renderer/components/ModelDisplay.tsx\n M src/renderer/components/PreviewBox.tsx\n M src/renderer/components/PromptEditor.tsx\n M src/renderer/components/ResolutionSegments.tsx\n M src/renderer/components/SettingsModal.tsx\n M src/renderer/data/templates.ts\n M src/renderer/index.html\n M src/renderer/state/useComposer.tsx\n M src/renderer/styles/controls.css\n M src/renderer/styles/layout.css\n M src/renderer/styles/results.css\n M src/shared/ipc.ts\n M src/shared/size.ts\n M src/shared/types.ts\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % node -e \"const fs=require('fs');let p='src/shared/types.ts';let s=fs.readFileSync(p,'utf8');s=s.replace(/export type Resolution = .*/,\\\"export type Resolution = 'auto' | '1K' | '2K' | '4K' | '6K' | '8K' | \\`\\${number}x\\${number}\\`\\\");s=s.replace(/if \\(r === 'auto' \\|\\| r === '1K' \\|\\| r === '2K' \\|\\| r === '4K'\\)/,\\\"if (r === 'auto' || r === '1K' || r === '2K' || r === '4K' || r === '6K' || r === '8K')\\\");fs.writeFileSync(p,s);console.log('types patched',s.length)\"\ntypes patched 5184\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % node -e \"const fs=require('fs');let s=fs.readFileSync('src/shared/size.ts','utf8');s=s.replace(/const LONG_EDGE[^}]*}/,\\\"const LONG_EDGE: Record<string, number> = { '1K': 1024, '2K': 2048, '4K': 4096, '6K': 6144, '8K': 8192 }\\\");console.log(/6K/.test(s)?'size ok':'size MISS');fs.writeFileSync('src/shared/size.ts',s)\" && node -e \"const fs=require('fs');let s=fs.readFileSync('src/shared/headless-schema.ts','utf8');s=s.replace(/if \\(v === 'auto' \\|\\| v === '1K' \\|\\| v === '2K' \\|\\| v === '4K'\\)/,\\\"if (v === 'auto' || v === '1K' || v === '2K' || v === '4K' || v === '6K' || v === '8K')\\\");s=s.replace(/auto\\/1K\\/2K\\/4K\\/WxH/,\\\"auto/1K/2K/4K/6K/8K/WxH\\\");fs.writeFileSync('src/shared/headless-schema.ts',s);console.log('schema ok')\"\nsize ok\nschema ok\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > /tmp/p1.mjs <<'MAUSEOF'\nheredoc> import fs from 'node:fs';\nheredoc> let p='src/renderer/components/ResolutionSegments.tsx';\nheredoc> let s=fs.readFileSync(p,'utf8');\nheredoc> s=s.replace(\"const SIZE_BASE: Resolution[] = ['auto', '1K', '2K', '4K']\",\"const SIZE_BASE: Resolution[] = ['auto', '1K', '2K', '4K', '6K', '8K']\");\nheredoc> fs.writeFileSync(p,s);\nheredoc> console.log('rs patched', s.length, /6K/.test(s)?'has6K':'no6K');\nheredoc> MAUSEOF\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % node /tmp/p1.mjs\nrs patched 2745 has6K\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo HELLO2\nHELLO2\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % echo PX_OK\nPX_OK\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % \npony@qiangdeMacBook-Pro gpt-image-2生图工具 % npm run typecheck:web 2>&1 | tail -n 20; echo TYPECHECK_EXIT=$?\n\n> gpt-image-studio@0.2.0 typecheck:web\n> tsc --noEmit -p tsconfig.web.json\n\nTYPECHECK_EXIT=0\npony@qiangdeMacBook-Pro gpt-image-2生图工具 % cat > /tmp/maus_patch.mjs <<'MAUSEOF'\nheredoc> \nheredoc> >....                                                                  \nt', req.requestId)\",\"console.log('[generate] dequeue start', req.requestId)\\n    console.log('[job] start job_id=', req.requestId, 'model=', preset.model, 'count=', req.params.count);\\n    console.log('[file] protocol check images=', req.images.length, 'job_id=', req.requestId);\\n    let lastErr: unknown = null;\\n    for (let attempt = 1; attempt <= 3; attempt++) {\\n      console.log('[job] attempt', attempt + '/3', req.requestId);\");}\nif(!s.includes('已重试3次')){s=s.replace(\"console.log('[generate] network error', req.requestId, ax.message)\\n      return { ok: false, code: 'network', message: ax.message || '网络错误' }\",\"console.log('[generate] network error', req.requestId, ax.message)\\n      lastErr = ax;\\n      if ((ax as any).code === 'ECONNABORTED' || !(ax as any).response) {\\n        console.log('[job] retry', req.requestId, 'attempt', attempt);\\n        continue;\\n      }\\n      return { ok: false, code: 'network', message: ax.message || '网络错误' }\\n    }\\n    }\\n    return { ok: false, code: 'network', message: (lastErr as Error)?.message || '网络错误 （已重试3次）' };\");}\nreturn s;});\npatch('src/renderer/styles/layout.css',s=>{\nif(!s.includes('P1-6左栏')){s=s.replace('.sidebar-section {','/* P1-6左栏等隙对 齐左线：gap统一12px，不改配色/字体 */\\n.sidebar-section {');}\nif(s.includes('gap: 10px;')){s=s.replace('gap: 10px;','gap: 12px;');}\nreturn s;});\nconsole.log('ALL_DONE');\" (Shell)\n    - [1] AXButton (拆分面板) [help=\"拆分面板\" actions=[press]]\n      - [2] AXButton [actions=[press]]\n      - [3] AXButton [actions=[press]]\n      - [4] AXButton [actions=[press]]\n      - [5] AXButton [actions=[press]]\n  - [6] AXButton [actions=[press]]\n  - [7] AXButton [help=\"此按钮也可以执行缩放窗口的操作\" actions=[press,zoomwindow]]\n  - [8] AXButton [actions=[press]]\n  - AXImage \"gpt-image-2生图工具\"\n- [9] AXMenuBar [id=_NS:177 actions=[cancel]] (menus collapsed: run an item with invoke_menu path, or pass query to search menu items)\n  - [10] AXMenuBarItem \"Apple\" [actions=[cancel,press,pick]]\n    - [11] AXMenu [actions=[cancel]]\n      - [12] AXMenuItem \"关于本机\" [id=_aboutThisMacRequested: actions=[cancel,press,pick]]\n      - [13] AXMenuItem \"系统信息\" [id=_systemInformationRequested: actions=[cancel,press,pick]]\n      - [14] AXMenuItem [enabled=false actions=[cancel,press,pick]]\n      - [15] AXMenuItem \"系统设置…，1项更新\" [id=_systemSettingsRequested: actions=[cancel,press,pick]]\n      - [16] AXMenuItem \"位置\" [id=_locationRequested: actions=[cancel,press,pick]]\n        - [17] AXMenu [actions=[cancel]]\n          - [18] AXMenuItem \"111\" [id=_networkLocationSwitchRequested: actions=[cancel,press,pick]]\n          - [19] AXMenuItem \"0410\" [id=_networkLocationSwitchRequested: actions=[cancel,press,pick]]\n          - [20] AXMenuItem \"0509\" [id=_networkLocationSwitchRequested: actions=[cancel,press,pick]]\n          - [21] AXMenuItem \"0912\" [id=_networkLocationSwitchRequested: actions=[cancel,press,pick]]\n          - [22] AXMenuItem \"自动\" [id=_networkLocationSwitchRequested: actions=[cancel,press,pick]]\n          - [23] AXMenuItem [enabled=false actions=[cancel,press,pick]]\n          - [24] AXMenuItem \"网络设置…\" [id=_networkPreferencesRequested: actions=[cancel,press,pick]]\n      - [25] AXMenuItem \"App Store\" [id=_appStoreRequested: actions=[cancel,press,pick]]\n      - [26] AXMenuItem [enabled=false actions=[cancel,press,pick]]\n      - [27] AXMenuItem \"最近使用的项目\" [id=_recentsRequested: actions=[cancel,press,pick]]\n        - [28] AXMenu [actions=[cancel]]\n          - [29] AXMenuItem \"应用程序\" [enabled=false actions=[cancel,press,pick]]\n          - [30] AXMenuItem \"播客.app\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [31] AXMenuItem \"在访达中显示“播客.app”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [32] AXMenuItem \"归档实用工具.app\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [33] AXMenuItem \"在访达中显示“归档实用工具.app”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [34] AXMenuItem \"腾讯会议.app\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [35] AXMenuItem \"在访达中显示“腾讯会议.app”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [36] AXMenuItem \"微信.app\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [37] AXMenuItem \"在访达中显示“微信.app”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [38] AXMenuItem \"系统设置.app\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [39] AXMenuItem \"在访达中显示“系统设置.app”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [40] AXMenuItem \"Command Code.app\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [41] AXMenuItem \"在访达中显示“Command Code.app”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [42] AXMenuItem \"Google Chrome.app\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [43] AXMenuItem \"在访达中显示“Google Chrome.app”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [44] AXMenuItem \"GPT Image.app\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [45] AXMenuItem \"在访达中显示“GPT Image.app”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [46] AXMenuItem \"OpenMausBot.app\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [47] AXMenuItem \"在访达中显示“OpenMausBot.app”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [48] AXMenuItem \"WPS Office.app\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [49] AXMenuItem \"在访达中显示“WPS Office.app”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [50] AXMenuItem [enabled=false actions=[cancel,press,pick]]\n          - [51] AXMenuItem \"文稿\" [enabled=false actions=[cancel,press,pick]]\n          - [52] AXMenuItem \"0819剧本创作skill\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [53] AXMenuItem \"在访达中显示“0819剧本创作skill”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [54] AXMenuItem \"0825影视配乐创作skill\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [55] AXMenuItem \"在访达中显示“0825影视配乐创作skill”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [56] AXMenuItem \"2026-09-12-agent-browser-mvp.md\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [57] AXMenuItem \"在访达中显示“2026-09-12-agent-browser-mvp.md”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [58] AXMenuItem \"2026-11-10_手机TVC_30s\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [59] AXMenuItem \"在访达中显示“2026-11-10_手机TVC_30s”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [60] AXMenuItem \"欧洲品牌\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [61] AXMenuItem \"在访达中显示“欧洲品牌”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [62] AXMenuItem \"石猴出海\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [63] AXMenuItem \"在访达中显示“石猴出海”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [64] AXMenuItem \"CLAUDE CODE\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [65] AXMenuItem \"在访达中显示“CLAUDE CODE”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [66] AXMenuItem \"DS-160-中文全译-面签核对版.md\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [67] AXMenuItem \"在访达中显示“DS-160-中文全译-面签核对版.md”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [68] AXMenuItem \"gpt-image-2生图工具\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [69] AXMenuItem \"在访达中显示“gpt-image-2生图工具”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [70] AXMenuItem \"MCP-SETUP.md\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [71] AXMenuItem \"在访达中显示“MCP-SETUP.md”\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [72] AXMenuItem [enabled=false actions=[cancel,press,pick]]\n          - [73] AXMenuItem \"服务器\" [enabled=false actions=[cancel,press,pick]]\n          - [74] AXMenuItem \"Macintosh HD\" [id=_recentItemRequested: actions=[cancel,press,pick]]\n          - [75] AXMenuItem [enabled=false actions=[cancel,press,pick]]\n          - [76] AXMenuItem \"清除菜单\" [id=_clearRecentItemsRequested: actions=[cancel,press,pick]]\n      - [77] AXMenuItem [enabled=false actions=[cancel,press,pick]]\n      - [78] AXMenuItem \"强制退出…\" [id=_forceQuitPanelRequested: actions=[cancel,press,pick]]\n      - [79] AXMenuItem \"强制退出“终端”\" [id=_forceQuitRequested: actions=[cancel,press,pick]]\n      - [80] AXMenuItem [enabled=false actions=[cancel,press,pick]]\n      - [81] AXMenuItem \"睡眠\" [id=_sleepRequested: actions=[cancel,press,pick]]\n      - [82] AXMenuItem \"重新启动…\" [id=_restartRequested: actions=[cancel,press,pick]]\n      - [83] AXMenuItem \"重新启动\" [id=_restartNowRequested: actions=[cancel,press,pick]]\n      - [84] AXMenuItem \"关机…\" [id=_shutDownRequested: actions=[cancel,press,pick]]\n      - [85] AXMenuItem \"关机\" [id=_shutDownNowRequested: actions=[cancel,press,pick]]\n      - [86] AXMenuItem [enabled=false actions=[cancel,press,pick]]\n      - [87] AXMenuItem \"锁定屏幕\" [id=_lockScreenRequested: actions=[cancel,press,pick]]\n      - [88] AXMenuItem \"退出登录“qiang zeng”…\" [id=_logOutRequested: actions=[cancel,press,pick]]\n      - [89] AXMenuItem \"退出登录“qiang zeng”\" [id=_logOutNowRequested: actions=[cancel,press,pick]]\n      - [90] AXMenuItem [enabled=false actions=[cancel,press,pick]]\n  - [91] AXMenuBarItem \"终端\" [id=_NS:1148 actions=[cancel,press,pick]]\n  - [92] AXMenuBarItem \"Shell\" [id=_NS:1161 actions=[cancel,press,pick]]\n  - [93] AXMenuBarItem \"编辑\" [id=_NS:1174 actions=[cancel,press,pick]]\n  - [94] AXMenuBarItem \"显示\" [id=_NS:1221 actions=[cancel,press,pick]]\n  - [95] AXMenuBarItem \"窗口\" [id=_NS:1236 actions=[cancel,press,pick]]\n  - [96] AXMenuBarItem \"帮助\" [id=_NS:176 actions=[cancel,press,pick]]\n","truncated":false,"window_id":162,"window_title":"gpt-image-2生图工具 — -zsh — 80×24"}

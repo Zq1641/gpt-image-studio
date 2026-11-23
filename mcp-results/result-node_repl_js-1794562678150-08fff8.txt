@@ -1,0 +1,1469 @@
+=== src/renderer/lib/imageFile.ts (2303 chars, 75 lines) ===
+import type { RefImage } from '@shared/types'
+
+const ALLOWED: RefImage['mime'][] = ['image/jpeg', 'image/png', 'image/webp']
+const MAX_LONG_EDGE = 2048
+const QUALITY = 0.92
+
+function nanoid(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
+}
+
+export async function fileToRefImage(file: File): Promise<RefImage> {
+  if (!ALLOWED.includes(file.type as RefImage['mime'])) {
+    throw new Error(`不支持的图片格式：${file.type || file.name}`)
+  }
+  const dataUrl = await readAsDataURL(file)
+  const img = await loadImage(dataUrl)
+  const { canvas, w, h } = downscale(img, MAX_LONG_EDGE)
+  const out = canvas.toDataURL('image/jpeg', QUALITY)
+  return {
+    id: nanoid(),
+    index: 0, // assigned by caller after re-numbering
+    name: file.name,
+    mime: 'image/jpeg',
+    dataUrl: out,
+    width: w,
+    height: h,
+    bytes: approxBytes(out),
+  }
+}
+
+function readAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onerror = () => reject(new Error('读取图片失败'))
+    r.onload = () => resolve(r.result as string)
+    r.readAsDataURL(file)
+  })
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('图片解码失败'))
+    img.src = src
+  })
+}
+
+function downscale(img: HTMLImageElement, maxLong: number) {
+  const long = Math.max(img.naturalWidth, img.naturalHeight)
+  if (long <= maxLong) {
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(img, 0, 0)
+    return { canvas, w: img.naturalWidth, h: img.naturalHeight }
+  }
+  const ratio = maxLong / long
+  const w = Math.round(img.naturalWidth * ratio)
+  const h = Math.round(img.naturalHeight * ratio)
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+  ctx.drawImage(img, 0, 0, w, h)
+  return { canvas, w, h }
+}
+
+function approxBytes(dataUrl: string): number {
+  const i = dataUrl.indexOf(',')
+  const b64 = i >= 0 ? dataUrl.slice(i + 1) : dataUrl
+  return Math.floor(b64.length * 0.75)
+}
+
+---TRUNC---
+=== src/renderer/state/useComposer.tsx (12793 chars, 299 lines) ===
+import {
+  createContext, useContext, useEffect, useMemo, useReducer, useRef,
+} from 'react'
+import type { ReactNode } from 'react'
+import type {
+  AspectRatio, Count, GeneratedImage, GenerateParams, GenerateRequest,
+  HistoryEntry, Preset, Quality, RefImage, Resolution,
+} from '@shared/types'
+import { DEFAULT_SETTINGS, getSupportedQualities, normalizeQuality, normalizeResolution, type AppSettings } from '@shared/types'
+import { TEMPLATES, type TemplateId } from '../data/templates'
+
+type Status = 'idle' | 'loading' | 'error'
+
+interface ComposerState {
+  prompt: string
+  params: GenerateParams
+  refImages: RefImage[]
+  status: Status
+  activeRequestId?: string
+  error?: { code: string; message: string; body?: string }
+  results: GeneratedImage[]
+  history: HistoryEntry[]
+  settings: AppSettings
+  // 当前预览条目（生成的新结果，或历史回填）。previewEntry.images 决定 PreviewBox 渲染哪些图
+  previewEntry?: HistoryEntry
+}
+
+type Action =
+  | { type: 'set-prompt'; value: string }
+  | { type: 'set-param'; key: keyof GenerateParams; value: GenerateParams[keyof GenerateParams] }
+  | { type: 'apply-template'; id: TemplateId }
+  | { type: 'set-refs'; refs: RefImage[] }
+  | { type: 'set-status'; status: Status; error?: ComposerState['error']; requestId?: string }
+  | { type: 'set-results'; results: GeneratedImage[]; entry?: HistoryEntry }
+  | { type: 'set-history'; history: HistoryEntry[] }
+  | { type: 'set-settings'; settings: AppSettings }
+  | { type: 'set-preview'; entry: HistoryEntry | undefined }
+
+const INITIAL_PARAMS: GenerateParams = { aspect: '1:1', resolution: 'auto', quality: 'auto', count: 1 }
+
+const initialState: ComposerState = {
+  prompt: '',
+  params: INITIAL_PARAMS,
+  refImages: [],
+  status: 'idle',
+  error: undefined,
+  results: [],
+  history: [],
+  settings: DEFAULT_SETTINGS,
+}
+
+function reducer(state: ComposerState, action: Action): ComposerState {
+  switch (action.type) {
+    case 'set-prompt': return { ...state, prompt: action.value }
+    case 'set-param': return { ...state, params: { ...state.params, [action.key]: action.value } }
+    case 'apply-template': {
+      const t = TEMPLATES.find((x) => x.id === action.id)
+      return t ? { ...state, prompt: t.text } : state
+    }
+    case 'set-refs': return { ...state, refImages: action.refs }
+    case 'set-status':
+      return {
+        ...state,
+        status: action.status,
+        error: action.error,
+        activeRequestId: action.status === 'loading' ? action.requestId : undefined,
+      }
+    case 'set-results':
+      return { ...state, results: action.results, previewEntry: action.entry, activeRequestId: undefined }
+    case 'set-history': return { ...state, history: action.history }
+    case 'set-settings': return { ...state, settings: action.settings }
+    case 'set-preview': return { ...state, previewEntry: action.entry, results: action.entry?.images ?? [] }
+    default: return state
+  }
+}
+
+interface ComposerApi {
+  state: ComposerState
+  setPrompt(v: string): void
+  setParam(key: keyof GenerateParams, value: AspectRatio | Resolution | Quality | Count): void
+  applyTemplate(id: TemplateId): void
+  insertSkill(name: string): void
+  setRefs(refs: RefImage[]): void
+  runGenerate(promptResolved: string): Promise<void>
+  cancelGenerate(): Promise<void>
+  refreshHistory(): Promise<void>
+  reloadSettings(): Promise<void>
+  setActivePreset(id: string): Promise<void>
+  setPresetModel(id: string, model: string): Promise<void>
+  addModel(name: string): Promise<void>
+  deleteModel(name: string): Promise<void>
+  addSkill(input: { name: string; content: string; sourceName?: string }): Promise<void>
+  deleteSkill(id: string): Promise<void>
+  saveSettings(patch: Partial<AppSettings>): Promise<void>
+  deleteHistoryEntry(id: string): Promise<void>
+  refillFromHistory(h: HistoryEntry): void
+}
+
+const ComposerContext = createContext<ComposerApi | null>(null)
+
+export function ComposerProvider({ children }: { children: ReactNode }) {
+  const [state, dispatch] = useReducer(reducer, initialState)
+  // 最新 state 的 ref：runGenerate 是异步的，await 之后闭包里的 state 会过期，
+  // 用 ref 拿“发起时的 prompt/params/refImages”快照，避免竞态。
+  const stateRef = useRef(state)
+  stateRef.current = state
+
+  useEffect(() => {
+    if (!window.api) return
+    void window.api.getSettings().then((s) => dispatch({ type: 'set-settings', settings: s }))
+    void window.api.listHistory().then((h) => dispatch({ type: 'set-history', history: h }))
+  }, [])
+
+  const api: ComposerApi = useMemo(() => ({
+    state,
+    setPrompt(v) { dispatch({ type: 'set-prompt', value: v }) },
+    setParam(key, value) { dispatch({ type: 'set-param', key: key as keyof GenerateParams, value: value as never }) },
+    applyTemplate(id) { dispatch({ type: 'apply-template', id }) },
+    // 点击右上角 skill → 在 prompt 末尾追加一个 skill token（`⟦skill:NAME⟧ `）。
+    // 重复点击同一 skill 不重复追加；PromptEditor 会把它 render 成红色胶囊。
+    // 用空格分隔（不用换行）：编辑器的文本模型里 <br> 不占字符，
+    // 换行分隔的 token 在回解析时容易粘连——空格能完整 surviving。
+    insertSkill(name) {
+      const token = `⟦skill:${name}⟧`
+      const cur = stateRef.current.prompt
+      if (cur.includes(token)) return
+      const sep = cur.length === 0 || /[\s]$/.test(cur) ? '' : ' '
+      dispatch({ type: 'set-prompt', value: `${cur}${sep}${token} ` })
+    },
+    setRefs(refs) { dispatch({ type: 'set-refs', refs }) },
+    async runGenerate(promptResolved: string) {
+      // P0 并发互斥（前端同步锁）：dispatch 是同步的，所以这个判断+占位是原子的——
+      // 连点、快捷键重入、React 18 StrictMode 双调用都只会放行第一个。
+      // main 侧还有第二道 busy 锁（防多窗口/未来多入口），此处是主防线。
+      if (stateRef.current.status === 'loading' || stateRef.current.activeRequestId) return
+      const snap = stateRef.current
+      const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      const req: GenerateRequest = {
+        requestId,
+        promptRaw: snap.prompt,
+        promptResolved,
+        params: snap.params,
+        images: snap.refImages.map((r) => r.dataUrl),
+        // 参考图快照随请求发给 main，落盘进历史，回填时可直接恢复
+        refImages: snap.refImages.map((r, i) => ({ ...r, index: i + 
+---TRUNC---
+=== src/renderer/components/PromptEditor.tsx (18725 chars, 480 lines) ===
+import { useEffect, useRef, useState } from 'react'
+import { useComposer } from '../state/useComposer'
+import { GenerateButton } from './GenerateButton'
+
+// ----------------------- HTML <-> 纯文本 -----------------------
+// 我们让 contenteditable 的内容是 HTML（用于给 @图N 着色），
+// 而 state.prompt 始终是纯文本（用于 resolvePrompt / 写入历史 / 发到中转站）。
+
+const PLACEHOLDER = '描述你想生成的画面… 输入 @ 引用已上传的参考图，点击上方模板快速填充'
+
+/** 把纯文本里的 `@图N` (N 是数字) 替换成高亮 HTML，
+ *  把 `⟦skill:NAME⟧` 替换成红色 Skill 胶囊。其它字符 escaped。
+ *  注意顺序：先 escape → skill token（含 ⟦⟧，escape 不动它们）→ @图N。 */
+export function mentionizeMarkup(plain: string): string {
+  if (!plain) return ''
+  const escaped = plain
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  // Skill 胶囊：只显示名字（全文生成时后台拼入）。
+  // 名字已在入库时去掉 HTML 特殊字符（见 normalizeSkillName），直接匹配即可。
+  const withSkills = escaped.replace(
+    /⟦skill:([^\]⟧\r\n]+)⟧/g,
+    (_m, n) => {
+      const name = String(n).replace(/["']/g, '')
+      return `<span class="skill-chip" data-skill="${name}">◆ ${name}</span>`
+    },
+  )
+  return withSkills.replace(
+    /@(?:参考图|图)(\d+)/g,
+    (_m, n) => `<span class="mention" data-mention="${n}">@图${n}</span>`,
+  )
+}
+
+/** 从 contenteditable 的 innerHTML 提取纯文本。
+ *
+ *  IMPORTANT: this is the canonical text model — the concatenation of text
+ *  nodes ONLY. Chromium's Range.toString() (used for live caret offsets) does
+ *  NOT include `<br>` elements NOR div boundaries, and the SHOW_TEXT
+ *  TreeWalker (used to map offsets back onto DOM positions) agrees with it.
+ *  The previous version translated `<br>` into `\n` — desyncing the three
+ *  views by one char per `<br>` and causing off-by-N errors: after the first
+ *  mention (which inserts a `<br>`), every later `@图X` was anchored at the
+ *  wrong offset and the chip ended up appended at the END of the whole prompt
+ *  on a new line, no matter where the user typed `@`. */
+export function htmlToText(html: string): string {
+  if (!html) return ''
+  let s = html.replace(/<br\s*\/?>/gi, '')
+  // Skill 胶囊是整段 token 的可视化：span 被删一半/属性丢失时，
+  // 里面的 `◆ 名字` 裸文本不能残留，统一还原成 token 再做完整性收尾。
+  s = s.replace(/<span[^>]*data-skill="([^"]*)"[^>]*>.*?<\/span>/gi, (_m, n) => `⟦skill:${n}⟧`)
+  s = s.replace(/<span[^>]*class="[^"]*skill-chip[^"]*"[^>]*>.*?<\/span>/gi, '')
+  s = s.replace(/<[^>]+>/g, '')
+  s = s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  // 残缺 token 收尾：胶囊只删了一半时会剩下 `⟦skill:名字` / `名字⟧` 碎片，
+  // 统一清除，保证文本模型里要么是完整 token、要么什么都没有。
+  s = s.replace(/⟦skill:[^\]⟧\r\n]*$/g, '')
+  s = s.replace(/^[^\[⟦\r\n]*⟧/g, '')
+  s = s.replace(/⟦skill:[^\]⟧\r\n]*[\r\n]/g, '')
+  return s
+}
+
+/** Map an absolute character index (canonical text model: text nodes only) to
+ *  the DOM text node + offset containing it. Falls back to the last text
+ *  node's end for indices at/after the total length. */
+function findTextPos(el: HTMLElement, abs: number): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let acc = 0
+  let node: Node | null
+  while ((node = walker.nextNode())) {
+    const tn = node as Text
+    const len = tn.data.length
+    if (acc + len >= abs) return { node: tn, offset: abs - acc }
+    acc += len
+  }
+  // abs may equal total length — fall back to last text node, end offset.
+  const all: Text[] = []
+  const w2 = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let n: Node | null
+  while ((n = w2.nextNode())) all.push(n as Text)
+  const last = all[all.length - 1]
+  if (last) return { node: last, offset: last.data.length }
+  return null
+}
+
+/** The text node that follows `node` in document order, or null. */
+function nextTextNodeAfter(el: HTMLElement, node: Node): Text | null {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let n: Node | null
+  let seen = false
+  while ((n = walker.nextNode())) {
+    if (seen) return n as Text
+    if (n === node) seen = true
+  }
+  return null
+}
+
+/** Live caret offset in the canonical text model, or -1 when unavailable. */
+function caretTextOffset(el: HTMLElement): number {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return -1
+  try {
+    const range = sel.getRangeAt(0)
+    if (!el.contains(range.startContainer)) return -1
+    const pre = document.createRange()
+    pre.selectNodeContents(el)
+    pre.setEnd(range.startContainer, range.startOffset)
+    return pre.toString().length
+  } catch {
+    return -1
+  }
+}
+
+/** True when the '@' at character index `idx` belongs to an EXISTING mention
+ *  chip (an old @图N), not to a fresh query the user is typing. */
+function isMentionChipAt(el: HTMLElement, text: string, idx: number): boolean {
+  if (text[idx] !== '@') return false
+  let node = findTextPos(el, idx)
+  if (!node) return false
+  // idx may sit on a node boundary (end of a text node); the '@' then starts
+  // the NEXT text node (e.g. a chip that begins a new line).
+  if (node.offset >= node.node.data.length) {
+    const next = nextTextNodeAfter(el, node.node)
+    if (!next) return false
+    node = { node: next, offset: 0 }
+  }
+  if (node.node.data[node.offset] !== '@') return false
+  const parent = node.node.parentElement
+  return !!parent && !!parent.closest('.mention')
+}
+
+/** Find the active "@query" segment the caret sits inside.
+ *
+ *  The query is anchored AT THE CARET: scan backward from the caret across
+ *  non-whitespace, non-'@' characters until we hit a fresh '@' (that's the
+ *  anchor). The scan stops — no menu — at whitespace, at an old mention chip,
+ *  or at the start of the text. Anchoring at the caret (instead of at the
+ *  LAST '@' in the text) is what keeps the popup correct when older @图N
+ *  chips exist later in the prompt: previously the query was anchored at the
+ *  last chip, the wrong range got deleted, and the new chip was appended at
+ *  the end of the whole prompt on a new line.
+ *
+ *  `fallbackCaret` is used only when the live selection is unavailable (React
+ *  re-render / IME); handleInput keeps it fresh from the la
+---TRUNC---
+=== src/renderer/styles/controls.css (21231 chars, 867 lines) ===
+/* Form controls. Studio Notebook aesthetic. */
+
+/* Field group: an eyebrow label + a content block. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.field-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--track-loose);
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.field-value {
+  font-size: var(--body-size);
+  color: var(--text-1);
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 500;
+}
+
+/* Text-like inputs. */
+select,
+input[type="text"],
+input[type="password"],
+input[type="number"] {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--font-body);
+  font-size: var(--body-size);
+  color: var(--text-1);
+  background: var(--bg-input);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+input:hover, select:hover {
+  border-color: var(--text-3);
+}
+select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%231A1815' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+select:focus,
+input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Segmented control — kept for Resolution (size + quality, side by side) */
+.segments {
+  display: inline-flex;
+  background: var(--bg-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 2px;
+  gap: 1px;
+}
+.segments button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 6px 14px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.segments button:hover {
+  color: var(--text-1);
+}
+.segments button.is-active {
+  background: var(--text-1);
+  color: var(--bg-card);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+}
+
+/* Dual segments wrapper: two .segments placed side by side on a single row.
+   Used by ResolutionSegments (size + quality). The thin divider keeps the
+   two groups readable when both are unselected. */
+.dual-segments {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  gap: 0;
+}
+.dual-segments .segments {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.dual-segments .segments button {
+  flex: 1 1 0;
+  padding: 6px 0;
+  min-width: 0;
+}
+.dual-segments-divider {
+  width: 1px;
+  margin: 4px 4px;
+  background: var(--line);
+  flex: 0 0 auto;
+}
+
+/* Stepper */
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-input);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 2px;
+}
+.stepper button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  width: 28px; height: 28px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-1);
+  font-size: 15px; line-height: 1;
+  font-family: var(--font-mono);
+  transition: background-color 120ms ease;
+}
+.stepper button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.stepper button:disabled {
+  color: var(--text-4);
+  cursor: not-allowed;
+}
+.stepper .value {
+  min-width: 28px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+/* Square chip selector (Aspect Ratio) */
+.chip-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.chip-grid button {
+  appearance: none;
+  background: var(--bg-input);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 8px 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+  transition: all 120ms ease;
+  position: relative;
+}
+.chip-grid button:hover {
+  border-color: var(--text-1);
+  color: var(--text-1);
+}
+.chip-grid button.is-active {
+  background: var(--text-1);
+  border-color: var(--text-1);
+  color: var(--bg-card);
+}
+
+/* Pill (used for top-right icon buttons, history actions) */
+.pill {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--text-1);
+  padding: 5px 12px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--track-mid);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.pill:hover {
+  background: var(--text-1);
+  color: var(--bg-card);
+  border-color: var(--text-1);
+}
+.pill.danger {
+  color: var(--danger);
+  border-color: rgba(184, 36, 45, 0.4);
+}
+.pill.danger:hover {
+  background: var(--danger);
+  color: var(--bg-card);
+  border-color: var(--danger);
+}
+
+/* Generate button — embedded into the prompt card (compact).
+   Full-width .generate-btn--solo variant still exists in case we
+   re-introduce a stand-alone button elsewhere. */
+.generate-btn {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--track-loose);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--text-on-accent);
+  background: var(--accent);
+  padding: 0 14px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-btn);
+  transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
+}
+.generate-btn::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.35) 50%, transparent 100%);
+}
+.generate-btn .glyph {
+  font-fa
+---TRUNC---
+=== src/renderer/components/PreviewBox.tsx (22356 chars, 602 lines) ===
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useComposer } from '../state/useComposer'
+
+// print-frame 边长：实测所在列的可用宽×行高后取 min（封顶 560px，防超大屏糊成一片）。
+// 不再写死 400：窗口拉大拉小，正方形永远取“当前空间里最大的合法边长”。
+function usePrintSize(colRef: React.RefObject<HTMLDivElement | null>): number {
+  const [size, setSize] = useState(400)
+  useLayoutEffect(() => {
+    const el = colRef.current
+    if (!el) return
+    const measure = () => {
+      const row = el.parentElement
+      const head = el.parentElement?.querySelector(':scope > .eyebrow')
+      const rowH = row?.clientHeight ?? 400
+      const headH = head instanceof HTMLElement ? head.offsetHeight : 28
+      const w = el.clientWidth
+      // 行高 - header - 列内 gap ≈ 正方形可用高度；列宽即宽度上限
+      const next = Math.max(200, Math.min(560, w, rowH - headH - 2))
+      setSize((prev) => (Math.abs(prev - next) < 1 ? prev : next))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    if (el.parentElement) ro.observe(el.parentElement)
+    ro.observe(el)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [colRef])
+  return size
+}
+
+export function PreviewBox() {
+  const { state } = useComposer()
+  const { previewEntry, status, error } = state
+  const colRef = useRef<HTMLDivElement | null>(null)
+  const SIZE = Math.round(usePrintSize(colRef))
+  const images = previewEntry?.images ?? []
+  const [idx, setIdx] = useState(0)
+  const [viewer, setViewer] = useState(false)
+
+  // When a new entry lands (or images go away), reset to first plate and
+  // close any open viewer so the UI doesn't get stuck on a stale image.
+  useEffect(() => {
+    setIdx(0)
+    setViewer(false)
+  }, [previewEntry?.id])
+
+  // Keyboard navigation while the viewer is open.
+  useEffect(() => {
+    if (!viewer) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewer(false)
+      else if (e.key === 'ArrowLeft')  setIdx((i) => (i - 1 + images.length) % images.length)
+      else if (e.key === 'ArrowRight') setIdx((i) => (i + 1) % images.length)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [viewer, images.length])
+
+  const current = images[idx]
+  const isLoading = status === 'loading'
+  const isEmpty = !isLoading && images.length === 0
+
+  // 缺失图兜底：生成图文件可能被“清理缓存”删掉（历史条目保留），
+  // 此时 <img> 会 error，用虚线占位代替破图图标。
+  const [broken, setBroken] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    setBroken(new Set())
+  }, [previewEntry?.id])
+  const markBroken = (file: string) =>
+    setBroken((s) => {
+      if (s.has(file)) return s
+      const next = new Set(s)
+      next.add(file)
+      return next
+    })
+
+  // Save button.
+  //
+  //   count === 1  → single Save-As dialog with the proper .png filter
+  //                   (cleaner UX: user expects one file picker, not a
+  //                   directory picker, for a single image).
+  //   count  >  1  → directory picker, write every plate into the
+  //                   chosen folder in one shot (single-shot workflow).
+  const downloadAll = () => {
+    if (images.length === 0) return
+    if (images.length === 1) {
+      const first = images[0]
+      if (!first) return
+      void window.api.downloadHistoryFile(first.file)
+    } else {
+      void window.api.downloadHistoryFiles(images.map((i) => i.file))
+    }
+  }
+
+  const openAt = (i: number) => {
+    if (images.length === 0) return
+    setIdx(((i % images.length) + images.length) % images.length)
+    setViewer(true)
+  }
+
+  // -------- gallery (thumbnail) view --------
+  const box = (
+    <div className="print" ref={colRef} style={{ width: '100%' }}>
+      <div
+        className="print-frame"
+        style={{ width: SIZE, height: SIZE, padding: 0, position: 'relative' }}
+      >
+        {isLoading ? (
+          <Spinner />
+        ) : isEmpty ? (
+          <EmptyState error={error} />
+        ) : (
+          <div className="gallery">
+            {images.map((img, i) => (
+              <button
+                key={img.file}
+                type="button"
+                className="gallery-cell"
+                onClick={() => openAt(i)}
+                aria-label={`Open plate ${i + 1} of ${images.length}`}
+              >
+                {broken.has(img.file) ? (
+                  <span className="gallery-missing">missing file</span>
+                ) : (
+                  <img src={img.url} alt="" draggable={false} onError={() => markBroken(img.file)} />
+                )}
+                <span className="gallery-idx">{String(i + 1).padStart(2, '0')}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Print label — sits on the frame border. */}
+        {current && (
+          <div className="print-index">
+            Print № <strong>{images.length ? '0001' : '----'}</strong>
+          </div>
+        )}
+
+        {/* Save — bottom-right of the frame. Downloads every plate at
+            once (one folder picker, all files written). Label reflects
+            count so users know what they're getting. */}
+        {current && (
+          <button
+            type="button"
+            className="print-save"
+            onClick={(e) => { e.stopPropagation(); downloadAll() }}
+            aria-label="保存全部图片"
+            title="一键下载全部生成的图片"
+          >
+            ↓ Save {images.length > 1 ? `×${images.length}` : ''}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
+  if (viewer) {
+    return (
+      <Viewer
+        images={images}
+        idx={idx}
+        setIdx={setIdx}
+        onClose={() => setViewer(false)}
+        onSaveCurrent={() => {
+          if (!current) return
+          void window.api.downloadHistoryFile(current.file)
+        }}
+      />
+    )
+  }
+
+  return box
+}
+
+// ---------------------------------------------------------------------------
+// Viewer — fullscreen lightbox with keyboard nav, drag nav, right-click save.
+//
+// Gesture
+---TRUNC---
+=== src/renderer/components/HistoryPanel.tsx (5179 chars, 144 lines) ===
+import { useState } from 'react'
+import type { MouseEvent } from 'react'
+import { useComposer } from '../state/useComposer'
+import { CacheModal } from './CacheModal'
+import { displayPrompt, skillNamesIn } from '../lib/skillTokens'
+import type { HistoryEntry } from '@shared/types'
+
+// Archive 列表分页步长：首屏 100 条，点“加载更多”每次 +100。
+// 只影响渲染挂载数，不影响数据（history 全量仍在内存 state 里）。
+const PAGE_SIZE = 100
+
+function formatWhen(ts: number): string {
+  const d = new Date(ts)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}  ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function idxLabel(i: number, total: number): string {
+  // Show archive indices counting from oldest (=1) so the most recent is N.
+  // We render newest first; compute its display index as the total - i.
+  return String(total - i).padStart(4, '0')
+}
+
+export function HistoryPanel() {
+  const { state, refillFromHistory, refreshHistory } = useComposer()
+  const { history } = state
+  const [cacheOpen, setCacheOpen] = useState(false)
+  // 全量保存：历史不再截断。渲染侧分页展示（默认 100 条 + 加载更多），
+  // 避免几百条时一次性挂载全部 DOM 把列表拖卡。
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+
+  // 历史增删后把展示数 clamp 回合法区间：新增时保持用户已展开的数量，
+  // 删到不足一页时收回，避免“删完出现空白页”。
+  const total = history.length
+  const safeVisible = Math.min(Math.max(visibleCount, PAGE_SIZE), Math.max(total, PAGE_SIZE))
+  const visible = history.slice(0, safeVisible)
+  const hasMore = total > safeVisible
+
+  const showMore = () => setVisibleCount((c) => c + PAGE_SIZE)
+
+  const handleClear = async () => {
+    if (!confirm(`确认清空全部 ${history.length} 条历史记录？\n\n历史图片也会一并删除，此操作不可恢复。`)) return
+    await window.api.clearHistory()
+    await refreshHistory()
+  }
+
+  return (
+    <div className="archive">
+      <div className="archive-head">
+        <div className="archive-eyebrow">
+          Archive <span className="count">· {String(history.length).padStart(3, '0')}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button type="button" className="pill" onClick={() => setCacheOpen(true)}>
+            Cache
+          </button>
+          {history.length > 0 && (
+            <button type="button" className="pill danger" onClick={() => void handleClear()}>
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      {history.length === 0 ? (
+        <div className="archive-list" style={{
+          aspectRatio: '1 / 1',
+          maxWidth: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexDirection: 'column', gap: 8,
+        }}>
+          <div style={{
+            fontFamily: 'var(--font-display)', fontStyle: 'italic',
+            fontSize: 24, color: 'var(--text-3)',
+          }}>empty archive</div>
+          <div style={{
+            fontFamily: 'var(--font-mono)', fontSize: 10,
+            letterSpacing: 'var(--track-loose)', textTransform: 'uppercase',
+            color: 'var(--text-3)',
+          }}>Generate something to begin</div>
+        </div>
+      ) : (
+        <div className="archive-list" style={{ aspectRatio: '1 / 1', maxWidth: '100%' }}>
+          {visible.map((h, i) => (
+            <ArchiveRow
+              key={h.id}
+              entry={h}
+              displayIdx={idxLabel(i, total)}
+              onClick={() => refillFromHistory(h)}
+            />
+          ))}
+          {hasMore && (
+            <button type="button" className="archive-more" onClick={showMore}>
+              加载更多 · {total - safeVisible} / {total}
+            </button>
+          )}
+        </div>
+      )}
+      {cacheOpen && <CacheModal onClose={() => setCacheOpen(false)} />}
+    </div>
+  )
+}
+
+function ArchiveRow({
+  entry, displayIdx, onClick,
+}: { entry: HistoryEntry; displayIdx: string; onClick: () => void }) {
+  const { deleteHistoryEntry } = useComposer()
+
+  const handleDelete = async (e: MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm(`删除这条历史？\n\n「${(displayPrompt(entry.promptRaw) || '(空提示词)').slice(0, 40)}」\n其生成图文件也会一并回收（仍被其他条目引用时保留）。`)) return
+    await deleteHistoryEntry(entry.id)
+  }
+
+  const refCount = Array.isArray(entry.refImages) ? entry.refImages.length : 0
+  const skillCount = skillNamesIn(entry.promptRaw ?? '').length
+
+  return (
+    <div className="archive-item" onClick={onClick}>
+      <div className="idx">
+        №<br />
+        <span className="n">{displayIdx}</span>
+      </div>
+      <div className="ts">
+        {formatWhen(entry.createdAt)}
+        <span className="preset">{entry.presetName}</span>
+      </div>
+      <div className="body">
+        <div className="prompt">{displayPrompt(entry.promptRaw) || '(空提示词)'}</div>
+        <div className="params">
+          {entry.params.aspect} · {entry.params.resolution} · ×{entry.params.count} · {entry.images.length} plate{entry.images.length === 1 ? '' : 's'}{refCount > 0 ? ` · ${refCount} ref` : ''}{skillCount > 0 ? ` · ${skillCount} skill` : ''}
+        </div>
+      </div>
+      <button
+        type="button"
+        className="archive-del"
+        onClick={(e) => void handleDelete(e)}
+        aria-label="删除这条历史"
+        title="删除这条历史"
+      >×</button>
+    </div>
+  )
+}
+
+---TRUNC---
+=== src/main/normalize.ts (8749 chars, 228 lines) ===
+import { writeFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { app } from 'electron'
+import type { GenerateRequest, GenerateResult, HistoryEntry } from '../shared/types'
+import { sizeString } from '../shared/size'
+import { loadSettings } from './settings'
+import { activePreset } from './presets'
+
+interface RawImage {
+  file: string
+  url: string
+  width?: number
+  height?: number
+  mime: 'image/png'
+  bytes: number
+}
+
+function id(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+}
+
+function safeId(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_-]/g, '_')
+}
+
+function imagesDir(): string {
+  const d = join(app.getPath('userData'), 'images')
+  mkdirSync(d, { recursive: true })
+  return d
+}
+
+// URL 回包下载：60s 超时 + 50MB 体积上限。
+// 之前是裸 net.request：中转站返回超大/假死 URL 会一直挂着不回来，
+// 内存里攒 Buffer 也可能把主进程撑爆。超限直接报 io 错，不写盘、不进历史。
+const URL_DOWNLOAD_TIMEOUT_MS = 60_000
+const URL_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+async function downloadIfUrl(url: string): Promise<{ data: Buffer; mime: string } | { ok: false }> {
+  try {
+    const { net } = await import('electron')
+    return await new Promise((resolve) => {
+      let settled = false
+      const done = (v: { data: Buffer; mime: string } | { ok: false }) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(v)
+      }
+      const timer = setTimeout(() => {
+        try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+        done({ ok: false })
+      }, URL_DOWNLOAD_TIMEOUT_MS)
+      const req = net.request({ url, method: 'GET' })
+      const chunks: Buffer[] = []
+      let received = 0
+      let mime = 'image/png'
+      req.on('response', (resp) => {
+        // Content-Length 先验：超限直接掐掉，连 body 都不收
+        const cl = resp.headers['content-length']
+        const declared = Array.isArray(cl) ? cl[0] : cl
+        if (typeof declared === 'string' && /^\d+$/.test(declared.trim())) {
+          if (Number(declared) > URL_DOWNLOAD_MAX_BYTES) {
+            try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+            done({ ok: false })
+            return
+          }
+        }
+        const ct = resp.headers['content-type']
+        if (typeof ct === 'string') mime = ct.split(';')[0] || mime
+        resp.on('data', (c) => {
+          received += (c as Buffer).length
+          if (received > URL_DOWNLOAD_MAX_BYTES) {
+            try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+            done({ ok: false })
+            return
+          }
+          chunks.push(c as Buffer)
+        })
+        resp.on('end', () => done({ data: Buffer.concat(chunks), mime }))
+        resp.on('error', () => done({ ok: false } as never))
+      })
+      req.on('error', () => done({ ok: false } as never))
+      req.end()
+    })
+  } catch {
+    return { ok: false } as never
+  }
+}
+
+export async function normalizeResponse(req: GenerateRequest, raw: unknown): Promise<GenerateResult> {
+  const images = extractImages(raw)
+  if (images.length === 0) {
+    const bodyStr = typeof raw === 'string' ? raw : (() => { try { return JSON.stringify(raw) } catch { return String(raw) } })()
+    return { ok: false, code: 'parse', message: '未识别的响应格式', body: bodyStr.slice(0, 2000) }
+  }
+
+  // If the proxy returned FEWER images than we asked for, the upstream model
+  // probably capped `n` silently (or the proxy dropped a plate while
+  // re-wrapping the response). Log it loudly so a developer running with
+  // DevTools open sees what really came back — and include it in the user-
+  // facing message so the discrepancy isn't hidden.
+  const requested = req.params.count
+  if (images.length < requested) {
+    console.warn(`[normalize] requested ${requested} image(s), proxy returned ${images.length}`)
+  }
+
+  const entry: HistoryEntry = {
+    id: id(),
+    createdAt: Date.now(),
+    presetName: activePreset(loadSettings()).name,
+    model: activePreset(loadSettings()).model,
+    promptRaw: req.promptRaw,
+    promptResolved: req.promptResolved,
+    params: req.params,
+    size: sizeString(req.params.aspect, req.params.resolution, 'computed'),
+    refImageFiles: [],
+    // 参考图快照随历史持久化，回填时可直接恢复（老条目没有则为空）。
+    // 注意体积：快照是 JPEG dataUrl，history.json 会随条目线性变大，
+    // 瘦身请用 Cache 弹窗的“参考图快照”清理（只剥快照、不动历史）。
+    refImages: Array.isArray(req.refImages) ? req.refImages : [],
+    images: [],
+  }
+
+  const dir = imagesDir()
+  const saved: RawImage[] = []
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i]
+    if (!img) continue
+    const name = `${safeId(req.requestId)}-${i}.png`
+    try {
+      if (img.kind === 'b64') {
+        const bytes = Buffer.from(img.data, 'base64')
+        writeFileSync(join(dir, name), bytes)
+        saved.push({ file: name, url: `img://${name}`, mime: 'image/png', bytes: bytes.length })
+      } else {
+        const got = await downloadIfUrl(img.url)
+        if ('ok' in got) {
+          return { ok: false, code: 'io', message: '下载生成图片失败（超时或文件过大，限 60s / 50MB）' }
+        }
+        writeFileSync(join(dir, name), got.data)
+        saved.push({ file: name, url: `img://${name}`, mime: 'image/png', bytes: got.data.length })
+      }
+    } catch (e) {
+      return { ok: false, code: 'io', message: `写入图片失败：${(e as Error).message}` }
+    }
+  }
+
+  entry.images = saved.map((s) => ({ file: s.file, url: s.url }))
+  return { ok: true, entry }
+}
+
+type Extracted = { kind: 'b64'; data: string } | { kind: 'url'; url: string }
+
+// Pull every image we can find out of an arbitrary response object.
+//
+// Proxies in the wild wrap OpenAI-style responses in many shapes. We used
+// to only handle the canonical `{ data: [{ b64_json }, ...] }` and top-level
+// `b64_json` / `url` fallbacks. That dropped images silently when a proxy
+// used e.g. `{ data: { b64_json: ["...", "..."] } }` (data is an OBJECT,
+// not an array) or wrapped urls differently, so a 2-image request would
+// surface only 1 — and the user sa
+---TRUNC---
+=== src/main/api.ts (4169 chars, 107 lines) ===
+import axios, { type AxiosError, type AxiosResponse } from 'axios'
+import type { GenerateRequest, GenerateResult } from '../shared/types'
+import { loadSettings } from './settings'
+import { activePreset } from './presets'
+import { normalizeResponse } from './normalize'
+import { buildImageBody, estimatePayloadBytes } from '../shared/headless-schema'
+import type { PresetLike } from '../shared/headless-schema'
+import { generateQueue } from './queue'
+
+const CONTROLLERS = new Map<string, AbortController>()
+// 串行：所有生成请求经 generateQueue.enqueue FIFO 排队（与 CLI / MCP 三端同队列语义），
+// 按下顺序逐个执行，不再 busy 拒绝。三端共用 shared/headless-schema.ts 组装请求体。
+// 取消：cancel(requestId) abort 对应 controller；UI 侧用 activeRequestId 对账丢弃过期回包。
+
+const MAX_PAYLOAD_BYTES = 20 * 1024 * 1024
+
+function bodySnippet(s: string): string {
+  return s.length > 2000 ? s.slice(0, 2000) + '…' : s
+}
+
+export async function generate(req: GenerateRequest): Promise<GenerateResult> {
+  const settings = loadSettings()
+  const preset = activePreset(settings)
+  if (!preset.baseUrl) return { ok: false, code: 'config', message: '当前预设未配置 API Base URL，请到设置中编辑预设' }
+  if (!preset.apiKey) return { ok: false, code: 'config', message: '当前预设未配置 API Key，请到设置中编辑预设' }
+
+  // Payload size check (base64 strings are the heavy part).
+  const payloadBytes = estimatePayloadBytes(req.images)
+  if (payloadBytes > MAX_PAYLOAD_BYTES) {
+    return { ok: false, code: 'payload', message: `参考图总体积 ${(payloadBytes / 1024 / 1024).toFixed(1)}MB 过大（建议 ≤ 20MB）` }
+  }
+
+  const presetLike: PresetLike = {
+    model: preset.model,
+    imageFieldName: preset.imageFieldName,
+    sizeMode: preset.sizeMode,
+    sendAspectRatio: preset.sendAspectRatio,
+  }
+  const body = buildImageBody(
+    {
+      prompt: req.promptResolved,
+      aspect: req.params.aspect,
+      resolution: req.params.resolution,
+      quality: req.params.quality,
+      count: req.params.count,
+      images: req.images,
+    },
+    presetLike,
+    req.promptResolved,
+  )
+
+  const url = `${preset.baseUrl}/v1/images/generations`
+
+  console.log('[generate] enqueue', req.requestId, 'queueDepth=', generateQueue.pending())
+  return generateQueue.enqueue(async (): Promise<GenerateResult> => {
+    console.log('[generate] dequeue start', req.requestId)
+    const ctrl = new AbortController()
+    CONTROLLERS.set(req.requestId, ctrl)
+    try {
+      const resp: AxiosResponse = await axios.post(url, body, {
+        headers: {
+          Authorization: `Bearer ${preset.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: settings.timeoutMs,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        signal: ctrl.signal,
+        responseType: 'json',
+      })
+      const r = await normalizeResponse(req, resp.data)
+      console.log('[generate] done', req.requestId, r.ok ? 'ok' : r.code)
+      return r
+    } catch (e) {
+      const ax = e as AxiosError
+      if (ax.name === 'CanceledError' || ax.code === 'ERR_CANCELED') {
+        console.log('[generate] canceled', req.requestId)
+        return { ok: false, code: 'canceled', message: '已取消' }
+      }
+      if (ax.code === 'ECONNABORTED') {
+        console.log('[generate] timeout', req.requestId)
+        return { ok: false, code: 'timeout', message: `请求超时（${settings.timeoutMs}ms）` }
+      }
+      if (ax.response) {
+        const status = ax.response.status
+        const data = ax.response.data
+        const bodyStr = typeof data === 'string' ? data : (() => { try { return JSON.stringify(data) } catch { return String(data) } })()
+        console.log('[generate] http', req.requestId, status, bodySnippet(bodyStr).slice(0, 200))
+        return { ok: false, code: 'http', status, message: `HTTP ${status}`, body: bodySnippet(bodyStr) }
+      }
+      console.log('[generate] network error', req.requestId, ax.message)
+      return { ok: false, code: 'network', message: ax.message || '网络错误' }
+    } finally {
+      CONTROLLERS.delete(req.requestId)
+    }
+  })
+}
+
+export function cancel(requestId: string): void {
+  const c = CONTROLLERS.get(requestId)
+  if (c) {
+    c.abort()
+    CONTROLLERS.delete(requestId)
+  }
+  console.log('[generate] cancel requested', requestId)
+}
+
+---TRUNC---
+=== src/renderer/styles/layout.css (7393 chars, 296 lines) ===
+/* Window shell: vibrancy + paper grain + ruled guides. */
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--body-size);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  letter-spacing: 0.005em;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Drag strip for hiddenInset — keep transparent to let vibrancy show */
+.drag-strip {
+  height: 36px;
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px 0 84px;        /* leave space for traffic lights */
+  flex: 0 0 auto;
+  position: relative;
+}
+.drag-strip .brand {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 11px;
+  letter-spacing: var(--track-loose);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.drag-strip .brand .mark {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 17px;
+  font-weight: 400;
+  color: var(--text-1);
+  text-transform: none;
+  letter-spacing: -0.01em;
+}
+.drag-strip button,
+.drag-strip input {
+  -webkit-app-region: no-drag;
+}
+.drag-strip .icon-btn {
+  background: transparent;
+  border: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--text-2);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  letter-spacing: var(--track-mid);
+}
+.drag-strip .icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+/* Main horizontal layout. */
+.workbench {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Sidebar: warm tint with paper grain. Slight inner shadow on the right edge. */
+.sidebar {
+  width: 280px;
+  flex: 0 0 280px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 100%),
+    var(--bg-paper-tint);
+  border-right: 1px solid var(--line);
+  padding: 8px 22px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  overflow-y: auto;
+  position: relative;
+}
+.sidebar::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; right: 0;
+  width: 1px;
+  background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.04) 50%, transparent 100%);
+  pointer-events: none;
+}
+
+/* Main: paper with faint vertical guides every 240px.
+   NO vertical scroll — entire window must fit in 820px viewport. */
+.main {
+  flex: 1;
+  background: var(--bg-page);
+  background-image:
+    radial-gradient(circle at 25% 35%, rgba(26, 24, 21, 0.025) 0px, transparent 1.5px),
+    radial-gradient(circle at 75% 65%, rgba(26, 24, 21, 0.025) 0px, transparent 1.5px),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 239px,
+      rgba(26, 24, 21, 0.025) 239px,
+      rgba(26, 24, 21, 0.025) 240px
+    );
+  background-size: 9px 9px, 11px 11px, auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  padding: 12px 22px 16px;
+  gap: 12px;
+}
+
+/* Common: uppercase small label, like a darkroom equipment label */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--track-loose);
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 500;
+  margin-bottom: 0;
+  padding: 6px 0;
+  min-height: 24px;
+  box-sizing: border-box;
+}
+.eyebrow::before {
+  content: '';
+  width: 12px;
+  height: 1px;
+  background: var(--text-3);
+  opacity: 0.6;
+}
+.eyebrow .num {
+  color: var(--text-2);
+}
+
+/* Sidebar section grouping */
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+}
+.sidebar-section:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+/* ---------- Main pane: top row = editor + templates ----------
+   Both columns share the row height (driven by the templates TOC).
+   The prompt editor and ce-stage stretch to fill the editor column,
+   so the prompt box's bottom edge lines up with the TOC's bottom edge. */
+.main-row-top {
+  display: grid;
+  /* 流式自适应：编辑器吃掉所有剩余宽度，右列在 170~210px 间浮动。
+     窗口拉大时两列一起变宽，不再留空；字体字号保持不变。 */
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 210px);
+  gap: 16px;
+  align-items: stretch;
+  flex: 0 0 auto;
+}
+
+.main-row-bottom {
+  display: grid;
+  /* 流式自适应：两列等分剩余宽度（不再是写死的 400px+400px + 左对齐留空）。
+     高度由 flex: 1 吃掉窗口剩余纵空间：Output 正方形边长取
+     min(列宽, 行高)（PreviewBox 用 ResizeObserver 实测），
+     Archive 列表 flex:1 + 内部滚动，保证两区顶部永远对齐。 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.editor-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  position: relative;
+}
+.templates-col {
+  border-left: 1px solid var(--rule);
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ---------- Print + Archive columns ----------
+   Both columns share identical structure: a header row + a stretched box.
+   流式自适应（窗口任意缩放都不乱）：
+     - print-frame 不再是写死的 400×400：边长由 PreviewBox 实测
+       列宽×行高后取 min，保证永远是“当前空间里最大的正方形”，
+       顶部永远和 Archive 列表顶部对齐。
+     - archive-list flex:1 吃掉列内剩余高度 + 内部滚动，
+       历史再长也不把底边撑下去。
+   Mechanics: .main-row-bottom is a grid with `align-items: stretch`, so both
+   columns are already row-height tall. Each column is a flex column where the
+   header takes its intrinsic height and the box takes the rest (`flex: 1`
+   + `min-height: 0`). archive-list additionally scrolls internally
+   (`overflow: auto`) so long histories never push the bottom edge down. */
+.print-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 0 0 auto;
+  align-self: stretch;
+}
+.archive-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  align-self: stretch;
+}
+.print-col .print,
+.archive-col .archive {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Headers pin to the top … */
+.print-col > .eyebrow,
+.
+---TRUNC---

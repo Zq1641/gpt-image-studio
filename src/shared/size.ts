@@ -11,21 +11,35 @@ const RATIO: Record<AspectRatio, [number, number]> = {
   '9:16': [9, 16],
 }
 
-const LONG_EDGE: Record<Resolution, number> = { '1K': 1024, '2K': 2048, '4K': 4096 }
+const LONG_EDGE: Record<string, number> = { '1K': 1024, '2K': 2048, '4K': 4096, '6K': 6144, '8K': 8192 }
 
 function snap64(n: number): number {
   return Math.max(64, Math.round(n / 64) * 64)
 }
 
+function isWxH(r: string): boolean {
+  return /^\d+x\d+$/.test(r)
+}
+
 export function computeSize(aspect: AspectRatio, resolution: Resolution): string {
+  // auto：上层省略 size，让服务端默认；WxH：直接透传
+  if (resolution === 'auto') return ''
+  if (typeof resolution === 'string' && isWxH(resolution)) return resolution
+  const long = LONG_EDGE[resolution as string]
+  // 防御：未知档回退到 1K，不断裂
+  const base = typeof long === 'number' ? long : 1024
   const [w, h] = RATIO[aspect]
-  const long = LONG_EDGE[resolution]
-  const short = snap64((long * Math.min(w, h)) / Math.max(w, h))
-  return w >= h ? `${long}x${short}` : `${short}x${long}`
+  const short = snap64((base * Math.min(w, h)) / Math.max(w, h))
+  return w >= h ? `${base}x${short}` : `${short}x${base}`
 }
 
 export function sizeString(aspect: AspectRatio, resolution: Resolution, mode: SizeMode): string {
   if (mode === 'omit') return ''
-  if (mode === 'square') return `${LONG_EDGE[resolution]}x${LONG_EDGE[resolution]}`
+  if (typeof resolution === 'string' && isWxH(resolution)) return resolution
+  if (resolution === 'auto') return ''
+  if (mode === 'square') {
+    const long = LONG_EDGE[resolution as string] ?? 1024
+    return `${long}x${long}`
+  }
   return computeSize(aspect, resolution)
 }

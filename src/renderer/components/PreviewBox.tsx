@@ -1,13 +1,47 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useComposer } from '../state/useComposer'
 
-const SIZE = 400
+// print-frame 边长：实测所在列的可用宽×行高后取 min（封顶 560px，防超大屏糊成一片）。
+// 不再写死 400：窗口拉大拉小，正方形永远取“当前空间里最大的合法边长”。
+function usePrintSize(colRef: React.RefObject<HTMLDivElement | null>): number {
+  const [size, setSize] = useState(400)
+  useLayoutEffect(() => {
+    const el = colRef.current
+    if (!el) return
+    const measure = () => {
+      const row = el.parentElement
+      const head = el.parentElement?.querySelector(':scope > .eyebrow')
+      const rowH = row?.clientHeight ?? 400
+      const headH = head instanceof HTMLElement ? head.offsetHeight : 28
+      const w = el.clientWidth
+      // 行高 - header - 列内 gap ≈ 正方形可用高度；列宽即宽度上限
+      const next = Math.max(200, Math.min(560, w, rowH - headH - 2))
+      setSize((prev) => (Math.abs(prev - next) < 1 ? prev : next))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    if (el.parentElement) ro.observe(el.parentElement)
+    ro.observe(el)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [colRef])
+  return size
+}
 
 export function PreviewBox() {
   const { state } = useComposer()
   const { previewEntry, status, error } = state
+  const colRef = useRef<HTMLDivElement | null>(null)
+  const SIZE = Math.round(usePrintSize(colRef))
   const images = previewEntry?.images ?? []
   const [idx, setIdx] = useState(0)
+  // P1-5缩放下界：clamp(0.2,4.0)函数式更新，中心恒中，关闭重置
+  const [scale, setScale] = useState(1)
+  const clampScale = (v: number) => Math.min(4.0, Math.max(0.2, v));
+  const zoomBy = (d: number) => { console.log('[zoom] delta=', d); setScale((ss) => clampScale(Number((ss + d).toFixed(3)))); };
   const [viewer, setViewer] = useState(false)
 
   // When a new entry lands (or images go away), reset to first plate and
@@ -15,6 +49,7 @@ export function PreviewBox() {
   useEffect(() => {
     setIdx(0)
     setViewer(false)
+    setScale(1)
   }, [previewEntry?.id])
 
   // Keyboard navigation while the viewer is open.
@@ -32,6 +67,20 @@ export function PreviewBox() {
   const current = images[idx]
   const isLoading = status === 'loading'
   const isEmpty = !isLoading && images.length === 0
+
+  // 缺失图兜底：生成图文件可能被“清理缓存”删掉（历史条目保留），
+  // 此时 <img> 会 error，用虚线占位代替破图图标。
+  const [broken, setBroken] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    setBroken(new Set())
+  }, [previewEntry?.id])
+  const markBroken = (file: string) =>
+    setBroken((s) => {
+      if (s.has(file)) return s
+      const next = new Set(s)
+      next.add(file)
+      return next
+    })
 
   // Save button.
   //
@@ -59,7 +108,7 @@ export function PreviewBox() {
 
   // -------- gallery (thumbnail) view --------
   const box = (
-    <div className="print">
+    <div className="print" ref={colRef} style={{ width: '100%' }}>
       <div
         className="print-frame"
         style={{ width: SIZE, height: SIZE, padding: 0, position: 'relative' }}
@@ -69,7 +118,8 @@ export function PreviewBox() {
         ) : isEmpty ? (
           <EmptyState error={error} />
         ) : (
-          <div className="gallery">
+          <div className="gallery" style={{ transform: `scale(${scale})`, transformOrigin: 'center center' }}>
+        {/* P1-5缩放条 */}
             {images.map((img, i) => (
               <button
                 key={img.file}
@@ -78,13 +128,24 @@ export function PreviewBox() {
                 onClick={() => openAt(i)}
                 aria-label={`Open plate ${i + 1} of ${images.length}`}
               >
-                <img src={img.url} alt="" draggable={false} />
+                {broken.has(img.file) ? (
+                  <span className="gallery-missing">missing file</span>
+                ) : (
+                  <img src={img.url} alt="" draggable={false} onError={(e) => { console.log('[file] img onError', img.file, (e.target as HTMLImageElement).src.slice(0, 120)); markBroken(img.file) }} />
+                )}
                 <span className="gallery-idx">{String(i + 1).padStart(2, '0')}</span>
               </button>
             ))}
           </div>
         )}
 
+        {!isEmpty && !isLoading && (
+          <div className="gallery-zoombar" style={{ position: 'absolute', right: 8, top: 8, display: 'flex', gap: 4 }}>
+            <button type="button" aria-label="缩小" onClick={(e) => { e.stopPropagation(); zoomBy(-0.2) }}>−</button>
+            <button type="button" aria-label="放大" onClick={(e) => { e.stopPropagation(); zoomBy(0.2) }}>＋</button>
+            <button type="button" aria-label="重置" onClick={(e) => { e.stopPropagation(); console.log('[zoom] reset'); setScale(1) }}>1:1</button>
+          </div>
+        )}
         {/* Print label — sits on the frame border. */}
         {current && (
           <div className="print-index">

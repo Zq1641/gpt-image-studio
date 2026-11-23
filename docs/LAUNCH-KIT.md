@@ -219,9 +219,9 @@ now; Intel/Windows/Linux on the roadmap.
 ```
 Hey Product Hunt 👋
 
-I'm pony, the solo maker of gpt-image-2 · studio.
+I'm pony, the solo maker of gpt-image · studio.
 
-Why this exists: gpt-image-2 is an incredible model, but the web UI
+Why this exists: GPT image models are incredible, but the web UI
 fights you — slow loads, hidden pricing, and Base64 you have to copy
 into a new tab. This wraps it in a calm, local, native macOS shell.
 

@@ -1,8 +1,8 @@
 // Single source of truth for all data shapes crossing the process boundary.
 
 export type AspectRatio = '21:9' | '16:9' | '3:2' | '4:3' | '1:1' | '3:4' | '2:3' | '9:16'
-export type Resolution = '1K' | '2K' | '4K'
-export type Quality    = 'low' | 'medium' | 'high'
+export type Resolution = 'auto' | '1K' | '2K' | '4K' | '6K' | '8K' | `${number}x${number}`
+export type Quality    = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export type Count = 1 | 2 | 3 | 4
 export type ImageFieldName = 'image' | 'images' | 'image_url'
 export type SizeMode = 'computed' | 'square' | 'omit'
@@ -26,6 +26,50 @@ export interface AppSettings {
   // 兼容旧版：保留 model 默认值；新 UI 已经搬到 preset 上
   defaultModel: string
   timeoutMs: number
+  models: string[]                        // 全局可用模型列表（ModelDisplay 下拉用）
+  skills: Skill[]                         // 用户上传的 skill（右上角 Skills 区展示）
+}
+
+// 用户上传的 skill：Markdown / Txt 纯文本。全文存盘持久化，
+// 输入框里只 render 一个红色名称胶囊，生成时后台把全文拼入提示词。
+export interface Skill {
+  id: string
+  name: string                            // 胶囊上显示的名字（token 标识，全局唯一）
+  content: string                         // 全文（生成时拼入）
+  sourceName: string                      // 上传时的原始文件名
+  charCount: number
+  createdAt: number
+}
+
+export const DEFAULT_MODELS: string[] = ['gpt-image-2', 'gpt-image-1', 'dall-e-3', 'dall-e-2', 'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst']
+
+// 六档画质：新 2.6 全支持，老四模型只认前四档（auto/low/medium/high）
+export const QUALITY_ALL: Quality[] = ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
+export const QUALITY_LEGACY: Quality[] = ['auto', 'low', 'medium', 'high']
+
+export function isLegacyFourModel(model: string): boolean {
+  if (!model) return true
+  if (model.includes('2.6')) return false
+  const legacy = ['gpt-image-2', 'gpt-image-1', 'dall-e-3', 'dall-e-2']
+  if ((legacy as string[]).includes(model)) return true
+  // 自定义未知模型：放行全六档，避免 UI 炸
+  return false
+}
+
+export function getSupportedQualities(model: string): Quality[] {
+  return isLegacyFourModel(model) ? QUALITY_LEGACY : QUALITY_ALL
+}
+
+export function normalizeQuality(q: unknown, model?: string): Quality {
+  const allowed = model ? getSupportedQualities(model) : QUALITY_ALL
+  if (typeof q === 'string' && (allowed as string[]).includes(q)) return q as Quality
+  return 'medium'
+}
+
+export function normalizeResolution(r: unknown): Resolution {
+  if (r === 'auto' || r === '1K' || r === '2K' || r === '4K' || r === '6K' || r === '8K') return r as Resolution
+  if (typeof r === 'string' && /^\d+x\d+$/.test(r)) return r as Resolution
+  return 'auto'
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -45,6 +89,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   activePresetId: 'default',
   defaultModel: 'gpt-image-2',
   timeoutMs: 600_000,
+  models: [...DEFAULT_MODELS],
+  skills: [],
 }
 
 export interface RefImage {
@@ -57,6 +103,10 @@ export interface RefImage {
   height: number
   bytes: number
 }
+
+// 历史里持久化的参考图快照（dataUrl 可能很大，但为了回填必须保留）。
+// 回填时直接恢复为 RefImage，无需用户重新上传。
+export type ArchivedRefImage = RefImage
 
 export interface GenerateParams {
   aspect: AspectRatio
@@ -71,6 +121,20 @@ export interface GenerateRequest {
   promptResolved: string
   params: GenerateParams
   images: string[]
+  // 参考图快照（renderer 传来的 RefImage 元数据 + dataUrl），main 落盘历史时直接存。
+  refImages?: ArchivedRefImage[]
+}
+
+export interface CacheStats {
+  imageCount: number            // images/ 下的生成图文件数
+  imageBytes: number            // 生成图总字节
+  historyCount: number          // 历史条目数
+  historyBytes: number          // history.json 文件体积
+  refCount: number              // 历史内嵌参考图快照总数
+  refBytes: number              // 参考图快照 dataUrl 估算体积
+  totalBytes: number            // imageBytes + historyBytes（含内嵌快照）
+  userDataDir: string
+  imagesDir: string
 }
 
 export interface GeneratedImage {
@@ -90,6 +154,7 @@ export interface HistoryEntry {
   params: GenerateParams
   size: string
   refImageFiles: string[]
+  refImages?: ArchivedRefImage[]          // 参考图快照（新版写入；老条目缺失则回填为空）
   images: GeneratedImage[]
 }
 
@@ -99,6 +164,7 @@ export type GenerateErrorCode =
   | 'network'
   | 'timeout'
   | 'canceled'
+  | 'busy'
   | 'http'
   | 'parse'
   | 'io'

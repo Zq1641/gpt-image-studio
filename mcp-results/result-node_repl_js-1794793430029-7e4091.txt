@@ -1,0 +1,1672 @@
+===== main/normalize.ts lines=231 =====
+import { writeFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { app } from 'electron'
+import type { GenerateRequest, GenerateResult, HistoryEntry } from '../shared/types'
+import { sizeString } from '../shared/size'
+import { loadSettings } from './settings'
+import { activePreset } from './presets'
+
+interface RawImage {
+  file: string
+  url: string
+  width?: number
+  height?: number
+  mime: 'image/png'
+  bytes: number
+}
+
+function id(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+}
+
+function safeId(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_-]/g, '_')
+}
+
+function imagesDir(): string {
+  const d = join(app.getPath('userData'), 'images')
+  mkdirSync(d, { recursive: true })
+  return d
+}
+
+// URL 回包下载：60s 超时 + 50MB 体积上限。
+// 之前是裸 net.request：中转站返回超大/假死 URL 会一直挂着不回来，
+// 内存里攒 Buffer 也可能把主进程撑爆。超限直接报 io 错，不写盘、不进历史。
+const URL_DOWNLOAD_TIMEOUT_MS = 60_000
+const URL_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+async function downloadIfUrl(url: string): Promise<{ data: Buffer; mime: string } | { ok: false }> {
+  try {
+    const { net } = await import('electron')
+    return await new Promise((resolve) => {
+      let settled = false
+      const done = (v: { data: Buffer; mime: string } | { ok: false }) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(v)
+      }
+      const timer = setTimeout(() => {
+        try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+        done({ ok: false })
+      }, URL_DOWNLOAD_TIMEOUT_MS)
+      const req = net.request({ url, method: 'GET' })
+      const chunks: Buffer[] = []
+      let received = 0
+      let mime = 'image/png'
+      req.on('response', (resp) => {
+        // Content-Length 先验：超限直接掐掉，连 body 都不收
+        const cl = resp.headers['content-length']
+        const declared = Array.isArray(cl) ? cl[0] : cl
+        if (typeof declared === 'string' && /^\d+$/.test(declared.trim())) {
+          if (Number(declared) > URL_DOWNLOAD_MAX_BYTES) {
+            try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+            done({ ok: false })
+            return
+          }
+        }
+        const ct = resp.headers['content-type']
+        if (typeof ct === 'string') mime = ct.split(';')[0] || mime
+        resp.on('data', (c) => {
+          received += (c as Buffer).length
+          if (received > URL_DOWNLOAD_MAX_BYTES) {
+            try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
+            done({ ok: false })
+            return
+          }
+          chunks.push(c as Buffer)
+        })
+        resp.on('end', () => done({ data: Buffer.concat(chunks), mime }))
+        resp.on('error', () => done({ ok: false } as never))
+      })
+      req.on('error', () => done({ ok: false } as never))
+      req.end()
+    })
+  } catch {
+    return { ok: false } as never
+  }
+}
+
+export async function normalizeResponse(req: GenerateRequest, raw: unknown): Promise<GenerateResult> {
+  const images = extractImages(raw)
+  if (images.length === 0) {
+    const bodyStr = typeof raw === 'string' ? raw : (() => { try { return JSON.stringify(raw) } catch { return String(raw) } })()
+    return { ok: false, code: 'parse', message: '未识别的响应格式', body: bodyStr.slice(0, 2000) }
+  }
+
+  // If the proxy returned FEWER images than we asked for, the upstream model
+  // probably capped `n` silently (or the proxy dropped a plate while
+  // re-wrapping the response). Log it loudly so a developer running with
+  // DevTools open sees what really came back — and include it in the user-
+  // facing message so the discrepancy isn't hidden.
+  const requested = req.params.count
+  if (images.length < requested) {
+    console.warn(`[normalize] requested ${requested} image(s), proxy returned ${images.length}`)
+  }
+
+  const entry: HistoryEntry = {
+    id: id(),
+    createdAt: Date.now(),
+    presetName: activePreset(loadSettings()).name,
+    model: activePreset(loadSettings()).model,
+    promptRaw: req.promptRaw,
+    promptResolved: req.promptResolved,
+    params: req.params,
+    size: sizeString(req.params.aspect, req.params.resolution, 'computed'),
+    refImageFiles: [],
+    // 参考图快照随历史持久化，回填时可直接恢复（老条目没有则为空）。
+    // 注意体积：快照是 JPEG dataUrl，history.json 会随条目线性变大，
+    // 瘦身请用 Cache 弹窗的“参考图快照”清理（只剥快照、不动历史）。
+    refImages: Array.isArray(req.refImages) ? req.refImages : [],
+    images: [],
+  }
+
+  const dir = imagesDir()
+  const saved: RawImage[] = []
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i]
+    if (!img) continue
+    const name = `${safeId(req.requestId)}-${i}.png`
+    try {
+      if (img.kind === 'b64') {
+        const bytes = Buffer.from(img.data, 'base64')
+        writeFileSync(join(dir, name), bytes)
+        saved.push({ file: name, url: `img://${name}`, mime: 'image/png', bytes: bytes.length })
+        console.log('[localFile] saved', name, bytes.length + 'B', `img://${name}`);
+      } else {
+        const got = await downloadIfUrl(img.url)
+        if ('ok' in got) {
+          return { ok: false, code: 'io', message: '下载生成图片失败（超时或文件过大，限 60s / 50MB）' }
+        }
+        writeFileSync(join(dir, name), got.data)
+        saved.push({ file: name, url: `img://${name}`, mime: 'image/png', bytes: got.data.length })
+      }
+    } catch (e) {
+      return { ok: false, code: 'io', message: `写入图片失败：${(e as Error).message}` }
+    }
+  }
+
+  entry.images = saved.map((s) => ({ file: s.file, url: s.url }))
+  console.log('[job] job_id=', req.requestId, 'saved', saved.length + '/' + images.length, 'size=', req.params.aspect, req.params.resolution);
+  console.log('[file] protocol img:// files=', saved.map((s) => s.file).slice(0, 4).join(','));
+  return { ok: true, entry }
+}
+
+type Extracted = { kind: 'b64'; data: string } | { kind: 'url'; url: string }
+
+// Pull every image we can find out of an arbitrary response object.
+//
+// Proxies in the wild wrap OpenAI-style responses in many shapes. We used
+// to only handle the canonical `{ data: [{ b64_json }, ...] }` and top-level
+// `b64_json` / `url` fallbacks. That dropped images silently when a proxy
+// used e.g. `{ data: { b64_json: ["...", "..."] } }` (data is an OBJECT,
+// not an array) or wrapped urls differently, so a 2-image request would
+// surface only 1 — and the user saw "API charged for 2 but UI shows 1".
+//
+// This walker accepts the canonical format plus the common wrappers:
+//   - canonical array:   { data: [{ b64_json } | { url }, ...] }
+//   - alt array keys:    { images: [...] }, { output: [...] }, { result: [...] }
+//   - data-as-object:    { data: { b64_json: "..." | [...] } }
+//                        { data: { url: "..." | [...] } }
+//                        { data: { images: [...] } }
+//   - top-level scalar:  { b64_json: "..." }, { url: "..." }
+//   - top-level array:   { b64_json: ["...", "..."] }, { url: ["...", "..."] }
+function extractImages(raw: unknown): Extracted[] {
+  if (!raw || typeof raw !== 'object') return []
+  const out: Extracted[] = []
+  const r = raw as Record<string, unknown>
+
+  const pushStrings = (v: unknown, kind: 'b64' | 'url') => {
+    if (typeof v === 'string' && v.length > 0) {
+      out.push(kind === 'b64' ? { kind: 'b64', data: v } : { kind: 'url', url: v })
+    } else if (Array.isArray(v)) {
+      for (const x of v) {
+        if (typeof x === 'string' && x.length > 0) {
+          out.push(kind === 'b64' ? { kind: 'b64', data: x } : { kind: 'url', url: x })
+        }
+      }
+    }
+  }
+
+  const arrayKeys = ['data', 'images', 'output', 'result']
+  for (const key of arrayKeys) {
+    const v = r[key]
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (!item || typeof item !== 'object') continue
+        const it = item as Record<string, unknown>
+        if (typeof it.b64_json === 'string') out.push({ kind: 'b64', data: it.b64_json })
+        else if (typeof it.url === 'string') out.push({ kind: 'url', url: it.url })
+      }
+    } else if (v && typeof v === 'object') {
+      // data-as-object: { data: { b64_json: ... | [...] } } etc.
+      const inner = v as Record<string, unknown>
+      pushStrings(inner.b64_json, 'b64')
+      pushStrings(inner.url, 'url')
+      if (Array.isArray(inner.images)) {
+        for (const item of inner.images) {
+          if (!item || typeof item !== 'object') continue
+          const it = item as Record<string, unknown>
+          if (typeof it.b64_json === 'string') out.push({ kind: 'b64', data: it.b64_json })
+          else if (typeof it.url === 'string') out.push({ kind: 'url', url: it.url })
+        }
+      }
+    }
+  }
+
+  // Top-level scalar / array fallbacks.
+  pushStrings(r.b64_json, 'b64')
+  pushStrings(r.url, 'url')
+
+  // Dedup by content (some proxies duplicate b64_json at top-level AND
+  // inside data — we'd otherwise write the same plate twice).
+  const seen = new Set<string>()
+  return out.filter((e) => {
+    const key = e.kind === 'b64' ? `b:${e.data.slice(0, 64)}:${e.data.length}` : `u:${e.url}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+
+===== main/history.ts lines=338 =====
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, renameSync } from 'node:fs'
+import { join, basename, extname, resolve, sep } from 'node:path'
+import { app, dialog, BrowserWindow } from 'electron'
+import type { CacheStats, HistoryEntry } from '../shared/types'
+
+function userDataDir(): string {
+  return app.getPath('userData')
+}
+
+function indexPath(): string {
+  return join(userDataDir(), 'history.json')
+}
+
+function imagesDir(): string {
+  const d = join(app.getPath('userData'), 'images')
+  if (!existsSync(d)) mkdirSync(d, { recursive: true })
+  return d
+}
+
+// 下载类 IPC 只接受「images/ 目录下的单个 png 文件名」，不接受任何路径。
+// 白名单 ^[A-Za-z0-9_.-]+\.png$ 直接挡掉 ../、绝对路径、分隔符和空字节；
+// 再加长度上限，避免超长文件名拖垮文件系统 / 对话框。
+const SAFE_IMAGE_FILENAME = /^[A-Za-z0-9_.-]+\.png$/
+const SAFE_IMAGE_FILENAME_MAX = 200
+
+export function isSafeImageFilename(name: unknown): name is string {
+  return (
+    typeof name === 'string' &&
+    name.length > 0 &&
+    name.length <= SAFE_IMAGE_FILENAME_MAX &&
+    SAFE_IMAGE_FILENAME.test(name) &&
+    !name.includes('..')
+  )
+}
+
+// 把通过白名单的文件名解析成 images/ 下的绝对路径，并再做一次 startsWith 兜底，
+// 确保最终读写的路径一定落在 imagesDir 内（防 join 之后的路径逃逸）。
+function safeImagePath(name: string): string | null {
+  if (!isSafeImageFilename(name)) return null
+  const dir = imagesDir()
+  const abs = resolve(join(dir, name))
+  if (abs !== join(dir, name) || !abs.startsWith(resolve(dir) + sep)) return null
+  return abs
+}
+
+function readIndex(): HistoryEntry[] {
+  const p = indexPath()
+  if (!existsSync(p)) return []
+  try {
+    const raw = readFileSync(p, 'utf-8')
+    const arr = JSON.parse(raw) as HistoryEntry[]
+    if (!Array.isArray(arr)) return []
+    return arr
+  } catch {
+    // history.json 损坏时：把坏文件改名为 history.corrupt-<时间戳>.json 留证，
+    // 返回空列表让应用照常启动。只备份、不删除——用户数据一条都不丢，
+    // 修好 JSON 后改回文件名即可恢复。
+    try {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      renameSync(p, join(userDataDir(), `history.corrupt-${stamp}.json`))
+    } catch { /* 备份失败也无妨，下次启动再试 */ }
+    return []
+  }
+}
+
+function writeIndex(arr: HistoryEntry[]): void {
+  const dir = userDataDir()
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  // 原子写：先写 tmp 再 rename，避免进程崩溃时 history.json 写一半变坏。
+  // tmp 与目标同目录，保证 rename 是同文件系统原子操作。
+  const p = indexPath()
+  const tmp = `${p}.tmp`
+  writeFileSync(tmp, JSON.stringify(arr, null, 2), 'utf-8')
+  renameSync(tmp, p)
+}
+
+export function listHistory(): HistoryEntry[] {
+  return readIndex().sort((a, b) => b.createdAt - a.createdAt)
+}
+
+export function appendHistory(entry: HistoryEntry): HistoryEntry[] {
+  const arr = readIndex()
+  arr.push(entry)
+  writeIndex(arr)
+  return listHistory()
+}
+
+export function deleteHistory(id: string): HistoryEntry[] {
+  const arr = readIndex()
+  const target = arr.find((e) => e.id === id)
+  const rest = arr.filter((e) => e.id !== id)
+  writeIndex(rest)
+  // 单条删除同时回收它独占的生成图文件：先收集剩余条目仍在引用的文件名，
+  // 只删除不再被任何条目引用的文件，避免误删多条历史共享同名 plate 的极端情况。
+  try {
+    const stillUsed = new Set<string>()
+    for (const e of rest) {
+      for (const img of e.images ?? []) {
+        if (img?.file) stillUsed.add(img.file)
+      }
+    }
+    const dir = imagesDir()
+    for (const img of target?.images ?? []) {
+      const f = img?.file
+      if (!f || stillUsed.has(f)) continue
+      if (f.includes('..') || f.includes('/') || f.includes('\\')) continue
+      const abs = join(dir, f)
+      if (existsSync(abs)) {
+        try { unlinkSync(abs) } catch { /* ignore */ }
+      }
+    }
+  } catch { /* GC 失败不影响删除本身 */ }
+  return listHistory()
+}
+
+export function clearHistory(): HistoryEntry[] {
+  const dir = imagesDir()
+  try {
+    for (const f of readdirSync(dir)) {
+      try { unlinkSync(join(dir, f)) } catch { /* ignore */ }
+    }
+  } catch { /* dir 可能不存在，没问题 */ }
+  writeIndex([])
+  return []
+}
+
+// ---------------- 缓存统计 + 按项清理 ----------------
+// 体积口径：
+//   - imageBytes：images/ 目录下全部生成图文件的实际字节
+//   - historyBytes：history.json 文件体积（含内嵌的参考图快照）
+//   - refBytes：历史条目里 refImages[].dataUrl 的 base64 估算字节（history.json 的子集，
+//     单独列出来是为了让用户看清“参考图快照占了多少”，清理时可单独剥离）
+//   - totalBytes = imageBytes + historyBytes（用户磁盘上真实占用的合计数）
+
+function approxDataUrlBytes(dataUrl: string): number {
+  const i = dataUrl.indexOf(',')
+  const b64 = i >= 0 ? dataUrl.slice(i + 1) : dataUrl
+  return Math.floor(b64.length * 0.75)
+}
+
+export function getCacheStats(): CacheStats {
+  const dir = imagesDir()
+  let imageCount = 0
+  let imageBytes = 0
+  try {
+    for (const f of readdirSync(dir)) {
+      try {
+        const st = statSync(join(dir, f))
+        if (st.isFile()) {
+          imageCount += 1
+          imageBytes += st.size
+        }
+      } catch { /* ignore */ }
+    }
+  } catch { /* dir 可能不存在 */ }
+
+  let historyBytes = 0
+  try {
+    const st = statSync(indexPath())
+    if (st.isFile()) historyBytes = st.size
+  } catch { /* ignore */ }
+
+  const entries = readIndex()
+  let refCount = 0
+  let refBytes = 0
+  for (const e of entries) {
+    const refs = Array.isArray(e.refImages) ? e.refImages : []
+    for (const r of refs) {
+      refCount += 1
+      if (typeof r?.dataUrl === 'string') refBytes += approxDataUrlBytes(r.dataUrl)
+    }
+  }
+
+  return {
+    imageCount,
+    imageBytes,
+    historyCount: entries.length,
+    historyBytes,
+    refCount,
+    refBytes,
+    totalBytes: imageBytes + historyBytes,
+    userDataDir: userDataDir(),
+    imagesDir: dir,
+  }
+}
+
+// 只清生成图文件（images/*.png），历史条目保留（条目里的图会显示为缺失，由 UI 兜底）。
+export function clearGeneratedImages(): CacheStats {
+  const dir = imagesDir()
+  try {
+    for (const f of readdirSync(dir)) {
+      try { unlinkSync(join(dir, f)) } catch { /* ignore */ }
+    }
+  } catch { /* dir 可能不存在，没问题 */ }
+  return getCacheStats()
+}
+
+// 只剥离历史条目里的参考图快照（refImages 置空），生成图 + 历史索引都保留。
+// 这是 history.json 膨胀的主因：每张参考图快照约几百 KB ~ 数 MB。
+export function clearRefCache(): CacheStats {
+  const arr = readIndex()
+  let changed = false
+  for (const e of arr) {
+    if (Array.isArray(e.refImages) && e.refImages.length > 0) {
+      e.refImages = []
+      changed = true
+    }
+  }
+  if (changed) writeIndex(arr)
+  return getCacheStats()
+}
+
+// 全部清空：生成图 + 历史索引（含快照）。等价于老 clearHistory，但返回最新统计。
+export function clearAllCache(): CacheStats {
+  const dir = imagesDir()
+  try {
+    for (const f of readdirSync(dir)) {
+      try { unlinkSync(join(dir, f)) } catch { /* ignore */ }
+    }
+  } catch { /* dir 可能不存在，没问题 */ }
+  writeIndex([])
+  return getCacheStats()
+}
+
+// 弹原生保存框，把 userData/images/filename 拷一份到用户选的位置
+export async function downloadHistoryFile(filename: string): Promise<void> {
+  // 白名单 + startsWith 双校验：非法/穿越文件名直接拒绝，不读盘、不弹框。
+  const src = safeImagePath(filename)
+  if (!src) throw new Error('非法的文件名')
+  if (!existsSync(src)) throw new Error('源文件不存在')
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const dot = filename.lastIndexOf('.')
+  const ext = dot > 0 ? filename.slice(dot) : '.png'
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const result = await dialog.showSaveDialog(win ?? undefined!, {
+    title: '保存原图',
+    defaultPath: `${filename.replace(/\.[^.]+$/, '')}_${stamp}${ext}`,
+    filters: [{ name: '图片', extensions: [ext.replace('.', '')] }],
+  })
+  if (result.canceled || !result.filePath) return
+  const bytes = readFileSync(src)
+  writeFileSync(result.filePath, bytes)
+}
+
+// 用户一次下载当前生成的全部 plate。弹"选目录"对话框，把每一张
+// plate 拷到那个目录下，文件名保持原 filename。Cancel 是 no-op。
+//
+// 冲突处理：先把任务分成"无冲突"和"有冲突"两组。
+// - 全部不冲突 → 直接写，没打扰
+// - 有冲突 → 弹原生「保留两者 / 替换 / 取消」对话框
+//   - 保留两者：旧文件不动，新文件用 `image 2.png` 这种名字另存
+//   - 替换：覆盖
+//   - 取消：什么都不做（包括未冲突的也不写）
+export async function downloadHistoryFiles(filenames: string[]): Promise<void> {
+  if (filenames.length === 0) return
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const result = await dialog.showOpenDialog(win ?? undefined!, {
+    title: `保存全部 ${filenames.length} 张图`,
+    properties: ['openDirectory', 'createDirectory'],
+    defaultPath: undefined,
+  })
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) return
+  const dir = result.filePaths[0]
+  if (!dir) return
+
+  // 收集 (src, dest, exists) 任务列表。逐个做白名单 + startsWith 校验，
+  // 任一带路径穿越/非法字符的名字直接跳过（不读盘、不写目标目录）。
+  const tasks: Array<{ src: string; dest: string; exists: boolean }> = []
+  for (const fn of filenames) {
+    const src = safeImagePath(fn)
+    if (!src || !existsSync(src)) continue
+    const dest = join(dir, basename(fn))
+    // dest 也必须落在用户选的目录内
+    if (!resolve(dest).startsWith(resolve(dir) + sep)) continue
+    tasks.push({ src, dest, exists: existsSync(dest) })
+  }
+  if (tasks.length === 0) return
+
+  const conflicts = tasks.filter((t) => t.exists)
+  const newFiles = tasks.filter((t) => !t.exists)
+
+  // 全部不冲突 → 直接写入
+  if (conflicts.length === 0) {
+    for (const t of tasks) {
+      writeFileSync(t.dest, readFileSync(t.src))
+    }
+    return
+  }
+
+  // 有冲突 → 询问「保留两者 / 替换 / 取消」
+  const choice = await dialog.showMessageBox(win ?? undefined!, {
+    type: 'question',
+    title: '部分文件已存在',
+    message: `目标目录中已有 ${conflicts.length} 张同名图片`,
+    detail:
+      `未冲突的 ${newFiles.length} 张会直接保存。\n\n` +
+      `冲突文件:\n${conflicts.map((c) => '  • ' + basename(c.dest)).join('\n')}\n\n` +
+      `选择「保留两者」会用新名字（如 "image 2.png"）保存，不覆盖旧文件。`,
+    buttons: ['保留两者', '替换', '取消'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  })
+
+  if (choice.response === 2) return  // 取消：什么都不做
+
+  if (choice.response === 1) {
+    // 替换：全部覆盖
+    for (const t of tasks) {
+      writeFileSync(t.dest, readFileSync(t.src))
+    }
+    return
+  }
+
+  // 保留两者：未冲突的直接写；冲突的写到新名字
+  for (const t of newFiles) {
+    writeFileSync(t.dest, readFileSync(t.src))
+  }
+  for (const t of conflicts) {
+    const newDest = nextAvailableName(t.dest)
+    writeFileSync(newDest, readFileSync(t.src))
+  }
+}
+
+// 找一个不冲突的下一个文件名："foo.png" -> "foo 2.png" -> "foo 3.png" ...
+// 仿 macOS Finder 的"保留两者"命名习惯。
+function nextAvailableName(dest: string): string {
+  if (!existsSync(dest)) return dest
+  const ext = extname(dest)
+  const base = dest.slice(0, dest.len
+
+===== main/index.ts lines=179 =====
+import { app, BrowserWindow, ipcMain, protocol } from 'electron'
+import { join } from 'node:path'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { CH } from '../shared/ipc'
+import {
+  loadSettings, saveSettings, addModel, deleteModel,
+  addPreset, updatePreset, deletePreset, setActivePreset,
+  addSkill, deleteSkill,
+} from './settings'
+import { generate, cancel } from './api'
+import {
+  appendHistory, deleteHistory, listHistory, clearHistory, downloadHistoryFile, downloadHistoryFiles,
+  getCacheStats, clearGeneratedImages, clearRefCache, clearAllCache,
+  isSafeImageFilename,
+} from './history'
+import { registerImageProtocol } from './protocol'
+
+// img:// scheme registration MUST run before app.whenReady().
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'img', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+])
+
+// 改名迁移：appId 从 com.pony.gptimage2 → com.pony.gptimagestudio，
+// productName 从 "GPT Image 2" → "GPT Image" 后，userData 目录会变化，
+// 旧的历史/设置/图片全在老目录里。首次启动时把老目录内容拷贝过来
+// （只拷贝、不删除老目录、不覆盖新目录已有文件），老用户升级不断档。
+//
+// 老目录有两种可能（都要兼容）：
+//   1. 打包版旧应用：`…/Application Support/GPT Image 2`（按旧 productName 推导）
+//   2. 开发版跑出来的：`…/Application Support/gpt-image-2`（按旧 package.json name 推导）
+// 候选按优先级排序，命中第一个含数据的即用，不逐个合并（防两个老目录各一份导致混拷）。
+function migrateLegacyUserData(): void {
+  try {
+    const next = app.getPath('userData')
+    const appData = app.getPath('appData')
+    const candidates = [
+      join(appData, 'GPT Image 2'),
+      join(appData, 'gpt-image-2'),
+    ].filter((p) => p !== next)
+    const legacy = candidates.find((p) => {
+      try {
+        if (!existsSync(p) || !statSync(p).isDirectory()) return false
+        // 含任一有效数据才算命中：空的 Electron 残留目录不算
+        if (existsSync(join(p, 'settings.json'))) return true
+        if (existsSync(join(p, 'history.json'))) return true
+        try { return readdirSync(join(p, 'images')).length > 0 } catch { return false }
+      } catch { return false }
+    })
+    if (!legacy) return
+    if (!existsSync(next)) mkdirSync(next, { recursive: true })
+    // 只有新目录完全没数据时才迁：避免把旧快照覆盖掉新用户已用的配置。
+    // 新目录已有 settings.json/history.json/images 任一 → 视为已迁移或新用户，跳过。
+    const hasData =
+      existsSync(join(next, 'settings.json')) ||
+      existsSync(join(next, 'history.json')) ||
+      (() => {
+        try { return readdirSync(join(next, 'images')).length > 0 } catch { return false }
+      })()
+    if (hasData) return
+    let copied = 0
+    let skipped = 0
+    for (const name of ['settings.json', 'history.json']) {
+      const src = join(legacy, name)
+      const dest = join(next, name)
+      try {
+        if (!existsSync(src) || !statSync(src).isFile() || existsSync(dest)) { skipped += 1; continue }
+        copyFileSync(src, dest)
+        copied += 1
+      } catch (e) {
+        console.error(`[migrate] copy failed: ${name}`, e)
+      }
+    }
+    // images 目录逐文件拷贝（只拷缺失、不覆盖）：cpSync 整目录在 dest 已存在时
+    // 行为不一致，逐文件最稳，也能逐个统计。
+    try {
+      const srcDir = join(legacy, 'images')
+      if (existsSync(srcDir) && statSync(srcDir).isDirectory()) {
+        const destDir = join(next, 'images')
+        if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
+        for (const f of readdirSync(srcDir)) {
+          try {
+            const src = join(srcDir, f)
+            const dest = join(destDir, f)
+            if (!statSync(src).isFile() || existsSync(dest)) { skipped += 1; continue }
+            copyFileSync(src, dest)
+            copied += 1
+          } catch { skipped += 1 }
+        }
+      }
+    } catch (e) {
+      console.error('[migrate] copy failed: images', e)
+    }
+    console.log(`[migrate] legacy userData copied: ${legacy} -> ${next} (copied=${copied} skipped=${skipped}, legacy kept)`)
+  } catch (e) {
+    // 迁移失败不阻塞启动：用户最多是旧历史没带过来，老目录原样保留可手动拷。
+    console.error('[migrate] legacy userData migration failed', e)
+  }
+}
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1180,
+    height: 820,
+    minWidth: 980,
+    minHeight: 660,
+    show: false,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 16, y: 18 },
+    vibrancy: 'sidebar',
+    visualEffectState: 'active',
+    backgroundColor: '#00000000',
+    transparent: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+  win.once('ready-to-show', () => win.show())
+  if (process.env.ELECTRON_RENDERER_URL) {
+    win.loadURL(process.env.ELECTRON_RENDERER_URL)
+  } else {
+    win.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+}
+
+ipcMain.handle(CH.settingsGet, async () => loadSettings())
+ipcMain.handle(CH.settingsSet, async (_e, patch) => saveSettings(patch))
+ipcMain.handle(CH.modelsAdd, async (_e, name) => addModel(name))
+ipcMain.handle(CH.modelsDelete, async (_e, name) => deleteModel(name))
+ipcMain.handle(CH.presetsAdd, async (_e, p) => addPreset(p))
+ipcMain.handle(CH.presetsUpdate, async (_e, p) => updatePreset(p))
+ipcMain.handle(CH.presetsDelete, async (_e, id) => deletePreset(id))
+ipcMain.handle(CH.presetsSetActive, async (_e, id) => setActivePreset(id))
+ipcMain.handle(CH.skillsAdd, async (_e, input) => addSkill(input))
+ipcMain.handle(CH.skillsDelete, async (_e, id) => deleteSkill(id))
+ipcMain.handle(CH.generateRun, async (_e, req) => {
+  const r = await generate(req)
+  if (r.ok) appendHistory(r.entry)
+  return r
+})
+ipcMain.handle(CH.generateCancel, async (_e, { requestId }) => { cancel(requestId) })
+ipcMain.handle(CH.historyList, async () => listHistory())
+ipcMain.handle(CH.historyDelete, async (_e, { id }) => deleteHistory(id))
+ipcMain.handle(CH.historyClear, async () => clearHistory())
+ipcMain.handle(CH.cacheStats, async () => getCacheStats())
+ipcMain.handle(CH.cacheClearImages, async () => clearGeneratedImages())
+ipcMain.handle(CH.cacheClearRefs, async () => clearRefCache())
+ipcMain.handle(CH.cacheClearAll, async () => {
+  const stats = clearAllCache()
+  return { entries: [] as never[], stats }
+})
+ipcMain.handle(CH.historyDownload, async (_e, filename) => {
+  // IPC 入口先挡一层：文件名白名单，非法直接丢弃，不进 downloadHistoryFile。
+  if (!isSafeImageFilename(filename)) return
+  try { await downloadHistoryFile(filename) } catch (e) { console.error('download failed', e) }
+})
+ipcMain.handle(CH.historyDownloadAll, async (_e, filenames) => {
+  // 只放行通过白名单的文件名；非数组或含非法项直接过滤/拒绝。
+  if (!Array.isArray(filenames)) return
+  const safe = filenames.filter(isSafeImageFilename)
+  if (safe.length === 0) return
+  try { await downloadHistoryFiles(safe) } catch (e) { console.error('download-all failed', e) }
+})
+
+app.whenReady().then(() => {
+  migrateLegacyUserData()
+  registerImageProtocol()
+  createWindow()
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
+
+
+===== main/settings.ts lines=206 =====
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, chmodSync } from 'node:fs'
+import { join } from 'node:path'
+import { app } from 'electron'
+import { type AppSettings, DEFAULT_MODELS, DEFAULT_SETTINGS, ensureActive, newPresetId, normalizePreset, type Preset } from './presets'
+import { normalizeSkillList, normalizeSkillName, newSkillId, SKILL_CONTENT_MAX } from '../shared/skills'
+import { encryptApiKey, decryptApiKey, isEncryptedApiKey } from './secret'
+
+function settingsPath(): string {
+  return join(app.getPath('userData'), 'settings.json')
+}
+
+// API Key 只在「落盘」这一刻加密、「读取」这一刻解密：
+// macOS 下 safeStorage 底层走系统钥匙串，盘上不再出现明文 Key。
+// 应用内存 / 渲染进程里仍是明文，设置弹窗的编辑、reveal、复制都不受影响。
+// 两个函数都是幂等的：已加密串不会被二次加密，旧的明文 settings.json 也能平滑升级。
+function decryptPresets(s: AppSettings): AppSettings {
+  return {
+    ...s,
+    presets: (s.presets ?? []).map((p) => ({ ...p, apiKey: «redacted 13 chars»(p.apiKey ?? '') })),
+  }
+}
+
+function encryptPresets(s: AppSettings): AppSettings {
+  return {
+    ...s,
+    presets: (s.presets ?? []).map((p) => ({ ...p, apiKey: «redacted 13 chars»(p.apiKey ?? '') })),
+  }
+}
+
+export function loadSettings(): AppSettings {
+  const p = settingsPath()
+  if (!existsSync(p)) return ensureActive({ ...DEFAULT_SETTINGS })
+  try {
+    const raw = readFileSync(p, 'utf-8')
+    const parsed = JSON.parse(raw) as Partial<AppSettings> & {
+      baseUrl?: string; apiKey?: string; model?: string
+      imageFieldName?: 'image' | 'images' | 'image_url'
+      sizeMode?: 'computed' | 'square' | 'omit'
+      sendAspectRatio?: boolean
+    }
+    // 兼容 v1 单字段：把旧版 baseUrl/apiKey/model 全部塞到默认预设里
+    if (parsed.presets == null && (parsed.baseUrl || parsed.apiKey)) {
+      const legacy: Preset = normalizePreset({
+        id: 'default',
+        name: '默认预设',
+        baseUrl: parsed.baseUrl ?? '',
+        apiKey: «redacted 13 chars» ?? '',
+        pricePerImage: 0,
+        model: parsed.model || 'gpt-image-2',
+        imageFieldName: (parsed.imageFieldName ?? 'image') as Preset['imageFieldName'],
+        sizeMode: (parsed.sizeMode ?? 'computed') as Preset['sizeMode'],
+        sendAspectRatio: parsed.sendAspectRatio ?? true,
+      })
+      const ensured = ensureActive({ ...DEFAULT_SETTINGS, presets: [legacy], activePresetId: legacy.id })
+      // 老明文盘 → 立刻回写成加密盘，避免明文继续留在磁盘上
+      try { writeSettings(ensured) } catch { /* ignore */ }
+      return ensured
+    }
+    // 兼容旧版 settings.json：normalizeModels 缺字段/脏数据时都补默认列表
+    const models = normalizeModels(parsed.models)
+    const merged: AppSettings = { ...DEFAULT_SETTINGS, ...(parsed as Partial<AppSettings>), models }
+    const ensured = decryptPresets(ensureActive(merged))
+    // 关键修复：若旧盘上 models 字段缺失/非法，ensureActive 只在内存里补了默认，
+    // 不写盘会导致“每次加载看起来有 4 个、但删除永远删不掉”的幽灵列表。
+    // 这里一次性回填写盘，后续增删就有稳定的基准了。
+    // 顺带把「历史明文 Key」升级为加密盘（写回时统一加密）。
+    if (!Array.isArray(parsed.models) || (parsed.presets ?? []).some((p) => p?.apiKey && !isEncryptedApiKey(p.apiKey))) {
+      try { writeSettings(ensured) } catch { /* ignore */ }
+    }
+    return ensured
+  } catch {
+    return ensureActive({ ...DEFAULT_SETTINGS })
+  }
+}
+
+export function saveSettings(patch: Partial<AppSettings>): AppSettings {
+  const cur = loadSettings()
+  // saveSettings 是全量 patch 合并：若调用方没带 models，必须保留当前盘上的，
+  // 否则一次“只改 timeout”之类的保存就会把用户删过的模型又恢复出来。
+  const next = ensureActive({
+    ...cur,
+    ...patch,
+    models: patch.models === undefined ? cur.models : normalizeModels(patch.models),
+  })
+  writeSettings(next)
+  return next
+}
+
+export function addPreset(input: Omit<Preset, 'id'>): AppSettings {
+  const cur = loadSettings()
+  const p: Preset = normalizePreset({ ...input, id: newPresetId() })
+  const next: AppSettings = ensureActive({ ...cur, presets: [...cur.presets, p] })
+  writeSettings(next)
+  return next
+}
+
+export function updatePreset(p: Preset): AppSettings {
+  const cur = loadSettings()
+  const normalized = normalizePreset(p)
+  const next: AppSettings = ensureActive({
+    ...cur,
+    presets: cur.presets.map((x) => (x.id === normalized.id ? normalized : x)),
+  })
+  writeSettings(next)
+  return next
+}export function deletePreset(id: string): AppSettings {
+  const cur = loadSettings()
+  if (cur.presets.length <= 1) return cur   // 至少保留一条，避免空表
+  const presets = cur.presets.filter((p) => p.id !== id)
+  const activePresetId = cur.activePresetId === id ? presets[0]!.id : cur.activePresetId
+  const next: AppSettings = ensureActive({ ...cur, presets, activePresetId })
+  writeSettings(next)
+  return next
+}
+
+export function setActivePreset(id: string): AppSettings {
+  const cur = loadSettings()
+  if (!cur.presets.find((p) => p.id === id)) return cur
+  const next: AppSettings = ensureActive({ ...cur, activePresetId: id })
+  writeSettings(next)
+  return next
+}
+
+// ---------- Skills ----------
+// 上传入口：name 为空时调用方已按文件名推好默认名；同名视为“覆盖更新”
+// （保留原 id/createdAt，只换 content），不同名追加。
+export function addSkill(input: { name: string; content: string; sourceName?: string }): AppSettings {
+  const cur = loadSettings()
+  const name = normalizeSkillName(input.name)
+  const content = typeof input.content === 'string' ? input.content : ''
+  if (!name || !content.trim() || content.length > SKILL_CONTENT_MAX) return cur
+  const skills = normalizeSkillList(cur.skills)
+  const sourceName = typeof input.sourceName === 'string' ? input.sourceName : ''
+  const at = skills.findIndex((s) => s.name === name)
+  if (at >= 0) {
+    const prev = skills[at]!
+    skills[at] = { ...prev, content, sourceName, charCount: content.length }
+  } else {
+    skills.push({ id: newSkillId(), name, content, sourceName, charCount: content.length, createdAt: Date.now() })
+  }
+  const next: AppSettings = ensureActive({ ...cur, skills })
+  writeSettings(next)
+  return next
+}
+
+export function deleteSkill(id: string): AppSettings {
+  const cur = loadSettings()
+  const skills = normalizeSkillList(cur.skills)
+  if (!skills.some((s) => s.id === id)) return cur
+  const next: AppSettings = ensureActive({ ...cur, skills: skills.filter((s) => s.id !== id) })
+  writeSettings(next)
+  return next
+}
+
+function normalizeModels(input: unknown): string[] {
+  const list = Array.isArray(input) ? input : []
+  const cleaned = list
+    .filter((x): x is string => typeof x === 'string')
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0 && x.length <= 120)
+  const deduped = Array.from(new Set(cleaned))
+  return deduped.length > 0 ? deduped : [...DEFAULT_MODELS]
+}
+
+export function addModel(name: string): AppSettings {
+  const cur = loadSettings()
+  const trimmed = (name ?? '').trim()
+  if (!trimmed || trimmed.length > 120) return cur
+  const models = normalizeModels(cur.models)
+  if (!models.includes(trimmed)) models.push(trimmed)
+  else return cur // 已存在：直接返回，避免无意义写盘触发 UI 抖动
+  const next: AppSettings = ensureActive({ ...cur, models })
+  writeSettings(next)
+  return next
+}
+
+export function deleteModel(name: string): AppSettings {
+  const cur = loadSettings()
+  const trimmed = (name ?? '').trim()
+  if (!trimmed) return cur
+  const before = normalizeModels(cur.models)
+  const models = before.filter((m) => m !== trimmed)
+  // 至少保留一个模型；要删的不存在时直接返回，避免无意义写盘
+  if (models.length === 0 || models.length === before.length) return cur
+  const next: AppSettings = ensureActive({ ...cur, models })
+  // 若当前激活预设用的模型被删了，不动预设（预设允许自定义模型名），只收窄全局列表；
+  // 侧边栏会以虚线 custom chip 展示该预设模型，保证大字与 chips 对得上。
+  writeSettings(next)
+  return next
+}
+
+function writeSettings(s: AppSettings): void {
+  const dir = app.getPath('userData')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  // 落盘前把每个预设的 API Key 加密（内存里的 s 不变，返回给渲染进程仍是明文）。
+  const onDisk = encryptPresets(s)
+  const p = settingsPath()
+  // 原子写：先写同目录 tmp 再 rename，避免进程崩溃时 settings.json 写一半变坏。
+  const tmp = `${p}.tmp`
+  writeFileSync(tmp, JSON.stringify(onDisk, null, 2), { encoding: 'utf-8', mode: 0o600 })
+  // 收紧权限：即使进程 umask 宽松，含 API Key 的文件也只允许当前用户读写。
+  try { chmodSync(tmp, 0o600) } catch { /* ignore */ }
+  renameSync(tmp, p)
+  try { chmodSync(p, 0o600) } catch { /* ignore */ }
+}
+
+
+===== shared/types.ts lines=181 =====
+// Single source of truth for all data shapes crossing the process boundary.
+
+export type AspectRatio = '21:9' | '16:9' | '3:2' | '4:3' | '1:1' | '3:4' | '2:3' | '9:16'
+export type Resolution = 'auto' | '1K' | '2K' | '4K' | '6K' | '8K' | `${number}x${number}`
+export type Quality    = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type Count = 1 | 2 | 3 | 4
+export type ImageFieldName = 'image' | 'images' | 'image_url'
+export type SizeMode = 'computed' | 'square' | 'omit'
+
+export interface Preset {
+  id: string
+  name: string                            // 显示名，例如 "主力中转 / ClaudeCode 站"
+  baseUrl: string
+  apiKey: string
+  pricePerImage: number                   // 元/张；用户手动填，可为 0
+  // 模型 + 字段名 + 尺寸模式也跟随预设走；同一用户可能用不同预设调不同模型
+  model: string
+  imageFieldName: ImageFieldName
+  sizeMode: SizeMode
+  sendAspectRatio: boolean
+}
+
+export interface AppSettings {
+  presets: Preset[]                       // 至少 1 条
+  activePresetId: string                  // 等于 presets 中某条 id
+  // 兼容旧版：保留 model 默认值；新 UI 已经搬到 preset 上
+  defaultModel: string
+  timeoutMs: number
+  models: string[]                        // 全局可用模型列表（ModelDisplay 下拉用）
+  skills: Skill[]                         // 用户上传的 skill（右上角 Skills 区展示）
+}
+
+// 用户上传的 skill：Markdown / Txt 纯文本。全文存盘持久化，
+// 输入框里只 render 一个红色名称胶囊，生成时后台把全文拼入提示词。
+export interface Skill {
+  id: string
+  name: string                            // 胶囊上显示的名字（token 标识，全局唯一）
+  content: string                         // 全文（生成时拼入）
+  sourceName: string                      // 上传时的原始文件名
+  charCount: number
+  createdAt: number
+}
+
+export const DEFAULT_MODELS: string[] = ['gpt-image-2', 'gpt-image-1', 'dall-e-3', 'dall-e-2', 'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst']
+
+// 六档画质：新 2.6 全支持，老四模型只认前四档（auto/low/medium/high）
+export const QUALITY_ALL: Quality[] = ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
+export const QUALITY_LEGACY: Quality[] = ['auto', 'low', 'medium', 'high']
+
+export function isLegacyFourModel(model: string): boolean {
+  if (!model) return true
+  if (model.includes('2.6')) return false
+  const legacy = ['gpt-image-2', 'gpt-image-1', 'dall-e-3', 'dall-e-2']
+  if ((legacy as string[]).includes(model)) return true
+  // 自定义未知模型：放行全六档，避免 UI 炸
+  return false
+}
+
+export function getSupportedQualities(model: string): Quality[] {
+  return isLegacyFourModel(model) ? QUALITY_LEGACY : QUALITY_ALL
+}
+
+export function normalizeQuality(q: unknown, model?: string): Quality {
+  const allowed = model ? getSupportedQualities(model) : QUALITY_ALL
+  if (typeof q === 'string' && (allowed as string[]).includes(q)) return q as Quality
+  return 'medium'
+}
+
+export function normalizeResolution(r: unknown): Resolution {
+  if (r === 'auto' || r === '1K' || r === '2K' || r === '4K' || r === '6K' || r === '8K') return r as Resolution
+  if (typeof r === 'string' && /^\d+x\d+$/.test(r)) return r as Resolution
+  return 'auto'
+}
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  presets: [
+    {
+      id: 'default',
+      name: '默认预设',
+      baseUrl: '',
+      apiKey: '',
+      pricePerImage: 0,
+      model: 'gpt-image-2',
+      imageFieldName: 'image',
+      sizeMode: 'computed',
+      sendAspectRatio: true,
+    },
+  ],
+  activePresetId: 'default',
+  defaultModel: 'gpt-image-2',
+  timeoutMs: 600_000,
+  models: [...DEFAULT_MODELS],
+  skills: [],
+}
+
+export interface RefImage {
+  id: string
+  index: number
+  name: string
+  mime: 'image/jpeg' | 'image/png' | 'image/webp'
+  dataUrl: string
+  width: number
+  height: number
+  bytes: number
+}
+
+// 历史里持久化的参考图快照（dataUrl 可能很大，但为了回填必须保留）。
+// 回填时直接恢复为 RefImage，无需用户重新上传。
+export type ArchivedRefImage = RefImage
+
+export interface GenerateParams {
+  aspect: AspectRatio
+  resolution: Resolution
+  quality: Quality
+  count: Count
+}
+
+export interface GenerateRequest {
+  requestId: string
+  promptRaw: string
+  promptResolved: string
+  params: GenerateParams
+  images: string[]
+  // 参考图快照（renderer 传来的 RefImage 元数据 + dataUrl），main 落盘历史时直接存。
+  refImages?: ArchivedRefImage[]
+}
+
+export interface CacheStats {
+  imageCount: number            // images/ 下的生成图文件数
+  imageBytes: number            // 生成图总字节
+  historyCount: number          // 历史条目数
+  historyBytes: number          // history.json 文件体积
+  refCount: number              // 历史内嵌参考图快照总数
+  refBytes: number              // 参考图快照 dataUrl 估算体积
+  totalBytes: number            // imageBytes + historyBytes（含内嵌快照）
+  userDataDir: string
+  imagesDir: string
+}
+
+export interface GeneratedImage {
+  file: string
+  url: string
+  width?: number
+  height?: number
+}
+
+export interface HistoryEntry {
+  id: string
+  createdAt: number
+  presetName: string                      // 用哪个预设出的（历史展示用）
+  model: string
+  promptRaw: string
+  promptResolved: string
+  params: GenerateParams
+  size: string
+  refImageFiles: string[]
+  refImages?: ArchivedRefImage[]          // 参考图快照（新版写入；老条目缺失则回填为空）
+  images: GeneratedImage[]
+}
+
+export type GenerateErrorCode =
+  | 'config'
+  | 'payload'
+  | 'network'
+  | 'timeout'
+  | 'canceled'
+  | 'busy'
+  | 'http'
+  | 'parse'
+  | 'io'
+
+export type GenerateResult =
+  | { ok: true; entry: HistoryEntry }
+  | {
+      ok: false
+      code: GenerateErrorCode
+      status?: number
+      message: string
+      body?: string
+    }
+
+
+===== renderer/components/PreviewBox.tsx lines=615 =====
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useComposer } from '../state/useComposer'
+
+// print-frame 边长：实测所在列的可用宽×行高后取 min（封顶 560px，防超大屏糊成一片）。
+// 不再写死 400：窗口拉大拉小，正方形永远取“当前空间里最大的合法边长”。
+function usePrintSize(colRef: React.RefObject<HTMLDivElement | null>): number {
+  const [size, setSize] = useState(400)
+  useLayoutEffect(() => {
+    const el = colRef.current
+    if (!el) return
+    const measure = () => {
+      const row = el.parentElement
+      const head = el.parentElement?.querySelector(':scope > .eyebrow')
+      const rowH = row?.clientHeight ?? 400
+      const headH = head instanceof HTMLElement ? head.offsetHeight : 28
+      const w = el.clientWidth
+      // 行高 - header - 列内 gap ≈ 正方形可用高度；列宽即宽度上限
+      const next = Math.max(200, Math.min(560, w, rowH - headH - 2))
+      setSize((prev) => (Math.abs(prev - next) < 1 ? prev : next))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    if (el.parentElement) ro.observe(el.parentElement)
+    ro.observe(el)
+    window.addEventListener('resize', measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [colRef])
+  return size
+}
+
+export function PreviewBox() {
+  const { state } = useComposer()
+  const { previewEntry, status, error } = state
+  const colRef = useRef<HTMLDivElement | null>(null)
+  const SIZE = Math.round(usePrintSize(colRef))
+  const images = previewEntry?.images ?? []
+  const [idx, setIdx] = useState(0)
+  // P1-5缩放下界：clamp(0.2,4.0)函数式更新，中心恒中，关闭重置
+  const [scale, setScale] = useState(1)
+  const clampScale = (v: number) => Math.min(4.0, Math.max(0.2, v));
+  const zoomBy = (d: number) => { console.log('[zoom] delta=', d); setScale((ss) => clampScale(Number((ss + d).toFixed(3)))); };
+  const [viewer, setViewer] = useState(false)
+
+  // When a new entry lands (or images go away), reset to first plate and
+  // close any open viewer so the UI doesn't get stuck on a stale image.
+  useEffect(() => {
+    setIdx(0)
+    setViewer(false)
+    setScale(1)
+  }, [previewEntry?.id])
+
+  // Keyboard navigation while the viewer is open.
+  useEffect(() => {
+    if (!viewer) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewer(false)
+      else if (e.key === 'ArrowLeft')  setIdx((i) => (i - 1 + images.length) % images.length)
+      else if (e.key === 'ArrowRight') setIdx((i) => (i + 1) % images.length)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [viewer, images.length])
+
+  const current = images[idx]
+  const isLoading = status === 'loading'
+  const isEmpty = !isLoading && images.length === 0
+
+  // 缺失图兜底：生成图文件可能被“清理缓存”删掉（历史条目保留），
+  // 此时 <img> 会 error，用虚线占位代替破图图标。
+  const [broken, setBroken] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    setBroken(new Set())
+  }, [previewEntry?.id])
+  const markBroken = (file: string) =>
+    setBroken((s) => {
+      if (s.has(file)) return s
+      const next = new Set(s)
+      next.add(file)
+      return next
+    })
+
+  // Save button.
+  //
+  //   count === 1  → single Save-As dialog with the proper .png filter
+  //                   (cleaner UX: user expects one file picker, not a
+  //                   directory picker, for a single image).
+  //   count  >  1  → directory picker, write every plate into the
+  //                   chosen folder in one shot (single-shot workflow).
+  const downloadAll = () => {
+    if (images.length === 0) return
+    if (images.length === 1) {
+      const first = images[0]
+      if (!first) return
+      void window.api.downloadHistoryFile(first.file)
+    } else {
+      void window.api.downloadHistoryFiles(images.map((i) => i.file))
+    }
+  }
+
+  const openAt = (i: number) => {
+    if (images.length === 0) return
+    setIdx(((i % images.length) + images.length) % images.length)
+    setViewer(true)
+  }
+
+  // -------- gallery (thumbnail) view --------
+  const box = (
+    <div className="print" ref={colRef} style={{ width: '100%' }}>
+      <div
+        className="print-frame"
+        style={{ width: SIZE, height: SIZE, padding: 0, position: 'relative' }}
+      >
+        {isLoading ? (
+          <Spinner />
+        ) : isEmpty ? (
+          <EmptyState error={error} />
+        ) : (
+          <div className="gallery" style={{ transform: `scale(${scale})`, transformOrigin: 'center center' }}>
+        {/* P1-5缩放条 */}
+            {images.map((img, i) => (
+              <button
+                key={img.file}
+                type="button"
+                className="gallery-cell"
+                onClick={() => openAt(i)}
+                aria-label={`Open plate ${i + 1} of ${images.length}`}
+              >
+                {broken.has(img.file) ? (
+                  <span className="gallery-missing">missing file</span>
+                ) : (
+                  <img src={img.url} alt="" draggable={false} onError={(e) => { console.log('[file] img onError', img.file, (e.target as HTMLImageElement).src.slice(0, 120)); markBroken(img.file) }} />
+                )}
+                <span className="gallery-idx">{String(i + 1).padStart(2, '0')}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!isEmpty && !isLoading && (
+          <div className="gallery-zoombar" style={{ position: 'absolute', right: 8, top: 8, display: 'flex', gap: 4 }}>
+            <button type="button" aria-label="缩小" onClick={(e) => { e.stopPropagation(); zoomBy(-0.2) }}>−</button>
+            <button type="button" aria-label="放大" onClick={(e) => { e.stopPropagation(); zoomBy(0.2) }}>＋</button>
+            <button type="button" aria-label="重置" onClick={(e) => { e.stopPropagation(); console.log('[zoom] reset'); setScale(1) }}>1:1</button>
+          </div>
+        )}
+        {/* Print label — sits on the frame border. */}
+        {current && (
+          <div className="print-index">
+            Print № <strong>{images.length ? '0001' : '----'}</strong>
+          </div>
+        )}
+
+        {/* Save — bottom-right of the frame. Downloads every plate at
+            once (one folder picker, all files written). Label reflects
+            count so users know what they're getting. */}
+        {current && (
+          <button
+            type="button"
+            className="print-save"
+            onClick={(e) => { e.stopPropagation(); downloadAll() }}
+            aria-label="保存全部图片"
+            title="一键下载全部生成的图片"
+          >
+            ↓ Save {images.length > 1 ? `×${images.length}` : ''}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
+  if (viewer) {
+    return (
+      <Viewer
+        images={images}
+        idx={idx}
+        setIdx={setIdx}
+        onClose={() => setViewer(false)}
+        onSaveCurrent={() => {
+          if (!current) return
+          void window.api.downloadHistoryFile(current.file)
+        }}
+      />
+    )
+  }
+
+  return box
+}
+
+// ---------------------------------------------------------------------------
+// Viewer — fullscreen lightbox with keyboard nav, drag nav, right-click save.
+//
+// Gesture model:
+//   - Press (left button)  → start a tentative drag, no commit yet.
+//   - Move < 8px on release  → it was a click; close the viewer.
+//   - Move ≥ 8px on release  → it was a drag; flip plate if past the
+//                              threshold OR if the flick velocity is high.
+//                              Animate the slide-out / slide-in instead
+//                              of jumping — see `commitPage()` below.
+// ---------------------------------------------------------------------------
+
+function Viewer({
+  images, idx, setIdx, onClose, onSaveCurrent,
+}: {
+  images: { file: string; url: string }[]
+  idx: number
+  setIdx: (updater: (i: number) => number) => void
+  onClose: () => void
+  onSaveCurrent: () => void
+}) {
+  // Live translate in pixels. Negative = dragging left (next plate will
+  // slide in from the right). Positive = dragging right (previous plate).
+  const [dx, setDx] = useState(0)
+  // True only once we've passed the movement threshold — separates
+  // "click to close" from "drag to page".
+  const [dragging, setDragging] = useState(false)
+  // When a flip has been committed (drag past threshold or fast flick)
+  // we animate dx to ±stageW, then change idx and animate back to 0.
+  // `flying` is the state that suppresses click-close for the rest of
+  // this gesture.
+  const [flying, setFlying] = useState<null | { direction: 1 | -1 }>(null)
+
+  // Refs — values that change frequently during a drag and that we
+  // don't want to put in React state (would re-render every frame).
+  const stateRef = useRef({
+    startX: 0,
+    lastX: 0,
+    lastT: 0,
+    vx: 0,        // px/ms; signed
+    moved: 0,      // distance moved since press (signed)
+    raf: 0,
+    // True for one event tick after the user releases a drag, so the
+    // backdrop click that would otherwise close the viewer doesn't fire.
+    justDragged: false,
+  })
+
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const FLICK_THRESHOLD = 60   // px — past this on release, commit
+  const VELOCITY_THRESHOLD = 0.35 // px/ms — fast flick commits even below threshold
+  const DRAG_THRESHOLD = 8      // px — first move past this claims the drag
+
+  const onImgError = () => onClose()
+
+  // Drive dx through requestAnimationFrame so the drag follows the cursor
+  // with sub-frame latency and the slide-out/in animations ease smoothly.
+  const tick = (nextDx: number) => {
+    cancelAnimationFrame(stateRef.current.raf)
+    stateRef.current.raf = requestAnimationFrame(() => setDx(nextDx))
+  }
+
+  const onPointerDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    if (flying) return // ignore press during commit animation
+    const s = stateRef.current
+    s.startX = e.clientX
+    s.lastX = e.clientX
+    s.lastT = performance.now()
+    s.vx = 0
+    s.moved = 0
+    setDragging(false)
+    setDx(0)
+  }
+
+  // Use mousemove (not pointermove) so the handler only fires while a
+  // mouse 
+
+===== renderer/components/MainPane.tsx lines=41 =====
+import { PromptEditor } from './PromptEditor'
+import { SkillPicker } from './SkillPicker'
+import { PreviewBox } from './PreviewBox'
+import { HistoryPanel } from './HistoryPanel'
+import { useComposer } from '../state/useComposer'
+
+export function MainPane() {
+  const { state } = useComposer()
+  const skillCount = state.settings.skills?.length ?? 0
+  return (
+    <main className="main">
+      <section className="main-row-top">
+        <div className="editor-col">
+          <div className="eyebrow">
+            <span>Composition</span>
+          </div>
+          <PromptEditor />
+        </div>
+        <div className="templates-col">
+          <div className="eyebrow">
+            <span>Skills</span>
+            <span style={{ marginLeft: 'auto', color: 'var(--text-3)' }}>{skillCount}</span>
+          </div>
+          <SkillPicker />
+        </div>
+      </section>
+
+      <section className="main-row-bottom">
+        <div className="print-col">
+          <div className="eyebrow">
+            <span>Output</span>
+          </div>
+          <PreviewBox />
+        </div>
+        <div className="archive-col">
+          <HistoryPanel />
+        </div>
+      </section>
+    </main>
+  )
+}
+
+===== renderer/state/useComposer.tsx lines=302 =====
+import {
+  createContext, useContext, useEffect, useMemo, useReducer, useRef,
+} from 'react'
+import type { ReactNode } from 'react'
+import type {
+  AspectRatio, Count, GeneratedImage, GenerateParams, GenerateRequest,
+  HistoryEntry, Preset, Quality, RefImage, Resolution,
+} from '@shared/types'
+import { DEFAULT_SETTINGS, getSupportedQualities, normalizeQuality, normalizeResolution, type AppSettings } from '@shared/types'
+import { TEMPLATES, type TemplateId } from '../data/templates'
+
+type Status = 'idle' | 'loading' | 'error'
+
+interface ComposerState {
+  prompt: string
+  params: GenerateParams
+  refImages: RefImage[]
+  status: Status
+  activeRequestId?: string
+  error?: { code: string; message: string; body?: string }
+  results: GeneratedImage[]
+  history: HistoryEntry[]
+  settings: AppSettings
+  // 当前预览条目（生成的新结果，或历史回填）。previewEntry.images 决定 PreviewBox 渲染哪些图
+  previewEntry?: HistoryEntry
+}
+
+type Action =
+  | { type: 'set-prompt'; value: string }
+  | { type: 'set-param'; key: keyof GenerateParams; value: GenerateParams[keyof GenerateParams] }
+  | { type: 'apply-template'; id: TemplateId }
+  | { type: 'set-refs'; refs: RefImage[] }
+  | { type: 'set-status'; status: Status; error?: ComposerState['error']; requestId?: string }
+  | { type: 'set-results'; results: GeneratedImage[]; entry?: HistoryEntry }
+  | { type: 'set-history'; history: HistoryEntry[] }
+  | { type: 'set-settings'; settings: AppSettings }
+  | { type: 'set-preview'; entry: HistoryEntry | undefined }
+
+const INITIAL_PARAMS: GenerateParams = { aspect: '1:1', resolution: 'auto', quality: 'auto', count: 1 }
+
+const initialState: ComposerState = {
+  prompt: '',
+  params: INITIAL_PARAMS,
+  refImages: [],
+  status: 'idle',
+  error: undefined,
+  results: [],
+  history: [],
+  settings: DEFAULT_SETTINGS,
+}
+
+function reducer(state: ComposerState, action: Action): ComposerState {
+  switch (action.type) {
+    case 'set-prompt': return { ...state, prompt: action.value }
+    case 'set-param': return { ...state, params: { ...state.params, [action.key]: action.value } }
+    case 'apply-template': {
+      const t = TEMPLATES.find((x) => x.id === action.id)
+      return t ? { ...state, prompt: t.text } : state
+    }
+    case 'set-refs': return { ...state, refImages: action.refs }
+    case 'set-status':
+      return {
+        ...state,
+        status: action.status,
+        error: action.error,
+        activeRequestId: action.status === 'loading' ? action.requestId : undefined,
+      }
+    case 'set-results':
+      return { ...state, results: action.results, previewEntry: action.entry, activeRequestId: undefined }
+    case 'set-history': return { ...state, history: action.history }
+    case 'set-settings': return { ...state, settings: action.settings }
+    case 'set-preview': return { ...state, previewEntry: action.entry, results: action.entry?.images ?? [] }
+    default: return state
+  }
+}
+
+interface ComposerApi {
+  state: ComposerState
+  setPrompt(v: string): void
+  setParam(key: keyof GenerateParams, value: AspectRatio | Resolution | Quality | Count): void
+  applyTemplate(id: TemplateId): void
+  insertSkill(name: string): void
+  setRefs(refs: RefImage[]): void
+  runGenerate(promptResolved: string): Promise<void>
+  cancelGenerate(): Promise<void>
+  refreshHistory(): Promise<void>
+  reloadSettings(): Promise<void>
+  setActivePreset(id: string): Promise<void>
+  setPresetModel(id: string, model: string): Promise<void>
+  addModel(name: string): Promise<void>
+  deleteModel(name: string): Promise<void>
+  addSkill(input: { name: string; content: string; sourceName?: string }): Promise<void>
+  deleteSkill(id: string): Promise<void>
+  saveSettings(patch: Partial<AppSettings>): Promise<void>
+  deleteHistoryEntry(id: string): Promise<void>
+  refillFromHistory(h: HistoryEntry): void
+}
+
+const ComposerContext = createContext<ComposerApi | null>(null)
+
+export function ComposerProvider({ children }: { children: ReactNode }) {
+  const [state, dispatch] = useReducer(reducer, initialState)
+  // 最新 state 的 ref：runGenerate 是异步的，await 之后闭包里的 state 会过期，
+  // 用 ref 拿“发起时的 prompt/params/refImages”快照，避免竞态。
+  const stateRef = useRef(state)
+  stateRef.current = state
+
+  useEffect(() => {
+    if (!window.api) return
+    void window.api.getSettings().then((s) => dispatch({ type: 'set-settings', settings: s }))
+    void window.api.listHistory().then((h) => dispatch({ type: 'set-history', history: h }))
+  }, [])
+
+  const api: ComposerApi = useMemo(() => ({
+    state,
+    setPrompt(v) { dispatch({ type: 'set-prompt', value: v }) },
+    setParam(key, value) { dispatch({ type: 'set-param', key: key as keyof GenerateParams, value: value as never }) },
+    applyTemplate(id) { dispatch({ type: 'apply-template', id }) },
+    // 点击右上角 skill → 在 prompt 末尾追加一个 skill token（`⟦skill:NAME⟧ `）。
+    // 重复点击同一 skill 不重复追加；PromptEditor 会把它 render 成红色胶囊。
+    // 用空格分隔（不用换行）：编辑器的文本模型里 <br> 不占字符，
+    // 换行分隔的 token 在回解析时容易粘连——空格能完整 surviving。
+    insertSkill(name) {
+      const token = `⟦skill:${name}⟧`
+      const cur = stateRef.current.prompt
+      if (cur.includes(token)) return
+      const sep = cur.length === 0 || /[\s]$/.test(cur) ? '' : ' '
+      dispatch({ type: 'set-prompt', value: `${cur}${sep}${token} ` })
+    },
+    setRefs(refs) { dispatch({ type: 'set-refs', refs }) },
+    async runGenerate(promptResolved: string) {
+      // P0 并发互斥（前端同步锁）：dispatch 是同步的，所以这个判断+占位是原子的——
+      // 连点、快捷键重入、React 18 StrictMode 双调用都只会放行第一个。
+      // main 侧还有第二道 busy 锁（防多窗口/未来多入口），此处是主防线。
+      if (stateRef.current.status === 'loading' || stateRef.current.activeRequestId) return
+      const snap = stateRef.current
+      const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      const req: GenerateRequest = {
+        requestId,
+        promptRaw: snap.prompt,
+        promptResolved,
+        params: snap.params,
+        images: snap.refImages.map((r) => r.dataUrl),
+        // 参考图快照随请求发给 main，落盘进历史，回填时可直接恢复
+        refImages: snap.refImages.map((r, i) => ({ ...r, index: i + 1 })),
+      }
+      console.log('[input] promptRaw len=', snap.prompt.length, snap.prompt.slice(0, 200))
+      console.log('[parsedPrompt]', promptResolved.slice(0, 300))
+      console.log('[ipcPayload] requestId=', requestId, 'images=', req.images.length, 'refImages=', req.refImages?.length ?? 0)
+      console.log('[localFile] refs=', snap.refImages.map((r) => ({ name: r.name, bytes: r.bytes, hasData: !!r.dataUrl })).slice(0, 4));
+      console.log('[job] job_id=', requestId, 'enqueue images=', req.images.length);
+      console.assert(snap.refImages.every((r) => !!r.dataUrl), '[localFile] assert dataUrl');
+      if (snap.refImages.length > 0 && snap.refImages.some((r) => !r.dataUrl)) {
+        console.log('[ipcPayload] missing dataUrl/path, intercept');
+        dispatch({ type: 'set-status', status: 'error', error: { code: 'payload', message: '参考图缺失，已拦截（红点）' } })
+        return
+      }
+      if (req.images.some((s) => s.includes('/Users/'))) console.warn('[ipcPayload] contains /Users absolute path, should be file:// or img://')
+      dispatch({ type: 'set-status', status: 'loading', requestId })
+      let r: Awaited<ReturnType<typeof window.api.generate>>
+      try {
+        r = await window.api.generate(req)
+      } catch (e) {
+        dispatch({
+          type: 'set-status',
+          status: 'error',
+          error: { code: 'network', message: e instanceof Error ? e.message : '生成请求失败' },
+        })
+        return
+      }
+      if (r.ok) {
+        // 过期回包保护：等待期间用户可能点了取消（或又发起了新请求），
+        // 此时 activeRequestId 已变化，这个回包直接丢弃，不覆盖当前 UI。
+        if (stateRef.current.activeRequestId !== requestId) return
+        dispatch({ type: 'set-results', results: r.entry.images, entry: r.entry })
+        const h = await window.api.listHistory()
+        dispatch({ type: 'set-history', history: h })
+        dispatch({ type: 'set-status', status: 'idle' })
+      } else if (r.code === 'busy') {
+        // main 侧第二道锁（多窗口等极端路径），前端锁没拦住时才到这里。
+        // 注意：此前已 dispatch loading 占位，必须在此收尾，否则界面转圈卡死、
+        // 且 activeRequestId 一直占着导致后续所有生成都被前端锁拦掉。
+        if (stateRef.current.activeRequestId !== requestId) return
+        dispatch({ type: 'set-status', status: 'error', error: { code: r.code, message: r.message, body: r.body } })
+        return
+      } else {
+        if (stateRef.current.activeRequestId !== requestId) return
+        dispatch({ type: 'set-status', status: 'error', error: { code: r.code, message: r.message, body: r.body } })
+      }
+    },
+    async cancelGenerate() {
+      const requestId = stateRef.current.activeRequestId
+      if (!requestId) return
+      // 先让 main 侧 abort，再把 UI 切到 canceled 状态。
+      // generate() 的 promise 随后也会 resolve（canceled），但此时已不是 loading，
+      // 用 activeRequestId 对账：只处理“仍是同一请求”的回包，过期回包直接丢弃。
+      try {
+        await window.api.cancel(requestId)
+      } catch { /* ignore */ }
+      if (stateRef.current.activeRequestId === requestId) {
+        dispatch({ type: 'set-status', status: 'error', error: { code: 'canceled', message: '已取消生成' } })
+      }
+    },
+    refillFromHistory(h) {
+      dispatch({ type: 'set-prompt', value: h.promptRaw })
+      dispatch({ type: 'set-param', key: 'aspect', value: h.params.aspect })
+      dispatch({ type: 'set-param', key: 'resolution', value: normalizeResolution(h.params.resolution) })
+      // Old history rows (pre-quality field) lack `quality`; fall back to medium.
+      dispatch({ type: 'set-param', key: 'quality', value: normalizeQuality(h.params.quality) })
+      dispatch({ type: 'set-param', key: 'count', value: h.params.count })
+      // 回填参考图快照：老条目没有 refImages 字段时恢复为空，不崩。
+      const refs: RefImage[] = Array.isArray(h.refImages)
+        ? h.refImages.map((r, i) => ({ ...r, index: i + 1 }))
+        : []
+      dispatch({ type: 'set-refs', refs })
+      dispatch({ type: 'set-preview', entry: h })
+      dispatch({ type: 'set-status', status: 'idle', error: undefined })
+    },
+    async refreshHistory() {
+      const h = await window.api.listHistory()
+      dispatch({ type:
+

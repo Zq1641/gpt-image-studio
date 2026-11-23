@@ -266,6 +266,29 @@ input:focus {
   box-shadow: none;
 }
 
+/* 取消态：同尺寸同位置的“反色”按钮，危险色墨水 + 纸面描边。
+   保持 .generate-btn 的尺寸/字距/阴影语言，只换配色，避免布局跳动。 */
+.generate-btn.is-cancel {
+  background: var(--bg-card);
+  color: var(--danger);
+  border: 1px solid rgba(184, 36, 45, 0.45);
+  box-shadow: var(--shadow-card);
+}
+.generate-btn.is-cancel::before {
+  background: linear-gradient(90deg, transparent 0%, rgba(184, 36, 45, 0.25) 50%, transparent 100%);
+}
+.generate-btn.is-cancel:hover:not(:disabled) {
+  background: var(--danger);
+  color: var(--bg-card);
+  border-color: var(--danger);
+  box-shadow: 0 2px 0 rgba(120, 20, 28, 0.45), 0 12px 24px rgba(184, 36, 45, 0.25);
+  transform: translateY(-1px);
+}
+.generate-btn.is-cancel .glyph {
+  font-style: normal;
+  font-size: 15px;
+}
+
 /* ---------- contentEditable 提示词编辑器 ---------- */
 .ce-wrap {
   position: relative;
@@ -331,6 +354,82 @@ input:focus {
   cursor: default;
 }
 
+/* Skill 胶囊：红色，只显示名字（全文生成时后台拼入）。
+   比 @图N 更大更醒目：display 衬线斜体 + ◆ 前缀，一眼区分。 */
+.ce-editor .skill-chip {
+  display: inline-block;
+  color: var(--bg-card);
+  background: var(--danger);
+  border: 1px solid rgba(120, 20, 28, 0.55);
+  border-radius: var(--r-pill);
+  padding: 2px 12px;
+  margin: 0 2px;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  vertical-align: 1px;
+  user-select: all;
+  cursor: default;
+  box-shadow: 0 1px 0 rgba(120, 20, 28, 0.4), 0 4px 12px rgba(184, 36, 45, 0.22);
+}
+
+/* 右上角 Skills 行：复用 .toc-item 排版，只加删除钮与空态。
+   删除钮平时隐藏、hover 整行浮现（与 .archive-del 同一语言）。 */
+.skill-list .toc-upload {
+  width: 100%;
+  border-bottom-style: dashed;
+}
+.skill-list .toc-upload:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.skill-list .skill-row {
+  width: 100%;
+  grid-template-columns: 28px 1fr auto;
+}
+.skill-list .skill-row.is-confirm {
+  background: var(--danger-soft);
+}
+.skill-list .skill-empty {
+  padding: 10px 0 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: var(--track-mid);
+  color: var(--text-3);
+  border-bottom: 1px solid var(--rule);
+}
+.skill-del {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-3);
+  min-width: 20px; height: 20px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+  align-self: center;
+}
+.skill-row:hover .skill-del { opacity: 1; }
+.skill-del:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--bg-card);
+}
+.skill-row.is-confirm .skill-del {
+  opacity: 1;
+  color: var(--danger);
+  border-color: rgba(184, 36, 45, 0.4);
+}
+
 /* Mention menu — gallery-style dropdown */
 .mention-menu {
   position: fixed;
@@ -391,8 +490,7 @@ input:focus {
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-.model-display .model-name {
+}.model-display .model-name {
   font-family: var(--font-display);
   font-size: 28px;
   font-weight: 500;
@@ -407,6 +505,148 @@ input:focus {
   letter-spacing: var(--track-loose);
   text-transform: uppercase;
   color: var(--text-3);
+}
+
+/* 模型选择块：大字展示 + chips 直选 + 添加行 */
+.model-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.model-block .model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.model-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.model-add-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 1px 2px 1px 8px;
+  background: transparent;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.model-chip:hover { border-color: var(--text-3); }
+.model-chip.is-active {
+  background: var(--text-1);
+  border-color: var(--text-1);
+}
+.model-chip-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 2px 2px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-chip.is-active .model-chip-name { color: var(--bg-card); }
+.model-chip-name:disabled { cursor: default; opacity: 0.6; }
+.model-chip-x {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  width: 16px; height: 16px;
+  border-radius: 999px;
+  color: var(--text-3);
+  padding: 0;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+.model-chip:hover .model-chip-x { opacity: 1; }
+.model-chip.is-active .model-chip-x { color: rgba(251, 250, 246, 0.6); }
+.model-chip-x:hover {
+  background: var(--danger);
+  color: var(--bg-card);
+}
+.model-chip-x:disabled { cursor: default; }
+/* 待确认删除态：chip 描红，× 保持可见可再点取消 */
+.model-chip.is-confirm {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.model-chip.is-confirm .model-chip-x { opacity: 1; color: var(--danger); }
+.model-chip.is-confirm .model-chip-x:hover { color: var(--bg-card); }
+/* 预设自定义模型（不在全局列表）：虚线描边 + 不可删 */
+.model-chip.is-custom {
+  border-style: dashed;
+}
+/* 末尾 "+"：与 chips 同形状同字距的添加钮；激活态沿用 is-active 反色 */
+.model-chip.is-add {
+  appearance: none;
+  cursor: pointer;
+  justify-content: center;
+  min-width: 28px;
+  padding: 1px 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.model-chip.is-add:hover { border-color: var(--text-1); color: var(--text-1); }
+.model-chip.is-add.is-active { color: var(--bg-card); }
+.model-chip.is-add:disabled { cursor: default; opacity: 0.6; }
+/* 行内删除确认条：与 plate-err 同一 mono 红字语言 */
+.model-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid rgba(184, 36, 45, 0.4);
+  background: var(--danger-soft);
+  border-radius: var(--r-sm);
+  padding: 6px 8px;
+}
+.model-confirm-text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--danger);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-confirm-text .name { font-weight: 600; }
+.model-confirm-actions {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.model-confirm-actions .pill { padding: 3px 8px; }
+.model-error {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--danger);
+  letter-spacing: 0.02em;
 }
 
 /* ---------- Sidebar — Preset ---------- */
@@ -612,3 +852,21 @@ input:focus {
   text-transform: uppercase;
   color: var(--text-3);
 }
+
+/* Pixel返工 P3/P6: 分排防重叠+左栏等隙 (只加不动色/字) */
+.seg-field{display:flex;flex-direction:column;gap:6px}
+.seg-stack{display:flex;flex-direction:column;gap:6px;width:100%}
+.seg-grid{display:grid!important;gap:4px;width:100%}
+.seg-grid-size{grid-template-columns:repeat(3,1fr)}
+.seg-grid-quality{grid-template-columns:repeat(3,1fr)}
+.seg-grid button{min-width:0;min-height:28px;padding:5px 0;font-size:10px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;justify-content:center;box-sizing:border-box}
+.output-empty{color:var(--text-3);background:var(--bg-subtle);border:1px dashed var(--line-strong);border-radius:var(--r-sm);min-height:200px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:11px}
+.archive-list{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+.sidebar{gap:16px}
+.sidebar-section{gap:12px;padding-bottom:16px;margin-bottom:0;padding-left:0;margin-left:0;align-items:stretch}
+
+/* P0-3 FORMAT/QUALITY防重叠：固定高+等分+单行居中+小一号字，选中只变底色（不动配色/字体） */
+.seg-field{position:relative}
+.seg-grid-size,.seg-grid-quality{grid-template-columns:repeat(3,1fr)}
+.seg-grid button{height:30px;min-height:30px;font-size:10px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seg-grid button.is-active{background:var(--text-1);color:var(--bg-card)}

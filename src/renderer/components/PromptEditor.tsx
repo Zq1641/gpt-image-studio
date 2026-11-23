@@ -85,12 +85,12 @@ export function mentionizeMarkup(plain: string): string {
     /⟦skill:([^\]⟧\r\n]+)⟧/g,
     (_m, n) => {
       const name = String(n).replace(/["']/g, '')
-      return `<span class="skill-chip" contenteditable="false" data-skill="${name}">${name}</span>`
+      return `<span class="skill-chip" contenteditable="false" data-skill="${name}">${name}<span class="capsule-del" title="删除"></span></span>`
     },
   )
   return withSkills.replace(
     /@(?:参考图|图)(\d+)/g,
-    (_m, n) => `<span class="mention" contenteditable="false" data-mention="${n}">@图${n}</span>`,
+    (_m, n) => `<span class="mention" contenteditable="false" data-mention="${n}">@图${n}<span class="capsule-del" title="删除"></span></span>`,
   )
 }
 
@@ -422,6 +422,10 @@ export function PromptEditor() {
     mention.setAttribute('contenteditable', 'false')
     mention.setAttribute('data-mention', String(indexOneBased))
     mention.textContent = `@图${indexOneBased}`
+    const delBtn = document.createElement('span')
+    delBtn.className = 'capsule-del'
+    delBtn.setAttribute('title', '删除')
+    mention.appendChild(delBtn)
     // The trailing space keeps the chip from gluing onto the next word and
     // gives the caret a real text position to sit in AFTER the chip — a caret
     // anchored "after the span" makes Chromium push the next keystroke INSIDE
@@ -480,69 +484,112 @@ export function PromptEditor() {
       }
     }
 
-    // 胶囊整块原子化删除保护：当光标处于胶囊前后时，Backspace 或 Delete 一键整体移除胶囊，
+    // 胶囊整块原子化删除保护：当光标处于胶囊前后或选中胶囊时，Backspace 或 Delete 一键整体移除胶囊，
     // 防止删除胶囊内单个文字或光标渗入胶囊。
     if (e.key === 'Backspace' || e.key === 'Delete') {
       const sel = window.getSelection()
       if (sel && sel.rangeCount > 0) {
         const range = sel.getRangeAt(0)
-        if (range.collapsed) {
-          if (e.key === 'Backspace') {
-            let capsuleToDelete: HTMLElement | null = null
-            const container = range.startContainer
-            const offset = range.startOffset
+        // 非折叠选区（例如点击选中小胶囊、双击或拖拽框选覆盖了胶囊）：直接删除选区全部内容
+        if (!range.collapsed) {
+          e.preventDefault()
+          range.deleteContents()
+          handleInput()
+          return
+        }
 
-            if (container.nodeType === Node.TEXT_NODE) {
-              if (offset === 0) {
-                const prev = container.previousSibling
-                if (prev instanceof HTMLElement && (prev.classList.contains('mention') || prev.classList.contains('skill-chip'))) {
-                  capsuleToDelete = prev
-                }
-              }
-            } else if (container instanceof HTMLElement) {
-              if (offset > 0) {
-                const child = container.childNodes[offset - 1]
-                if (child instanceof HTMLElement && (child.classList.contains('mention') || child.classList.contains('skill-chip'))) {
-                  capsuleToDelete = child
-                }
-              }
-            }
+        if (e.key === 'Backspace') {
+          let capsuleToDelete: HTMLElement | null = null
+          const container = range.startContainer
+          const offset = range.startOffset
 
-            if (capsuleToDelete) {
-              e.preventDefault()
-              capsuleToDelete.remove()
-              handleInput()
-              return
-            }
-          } else if (e.key === 'Delete') {
-            let capsuleToDelete: HTMLElement | null = null
-            const container = range.startContainer
-            const offset = range.startOffset
-
-            if (container.nodeType === Node.TEXT_NODE) {
-              if (offset === (container as Text).data.length) {
-                const next = container.nextSibling
-                if (next instanceof HTMLElement && (next.classList.contains('mention') || next.classList.contains('skill-chip'))) {
-                  capsuleToDelete = next
-                }
+          if (container.nodeType === Node.TEXT_NODE) {
+            const tn = container as Text
+            if (offset === 0) {
+              const prev = tn.previousSibling
+              if (prev instanceof HTMLElement && (prev.classList.contains('mention') || prev.classList.contains('skill-chip'))) {
+                capsuleToDelete = prev
               }
-            } else if (container instanceof HTMLElement) {
-              if (offset < container.childNodes.length) {
-                const child = container.childNodes[offset]
-                if (child instanceof HTMLElement && (child.classList.contains('mention') || child.classList.contains('skill-chip'))) {
-                  capsuleToDelete = child
-                }
+            } else if (offset === 1 && tn.data.length === 1 && /^\s$/.test(tn.data)) {
+              // 光标紧跟在胶囊自带的尾随空格后，一键将空格与胶囊连带删除，无需按两次退格
+              const prev = tn.previousSibling
+              if (prev instanceof HTMLElement && (prev.classList.contains('mention') || prev.classList.contains('skill-chip'))) {
+                capsuleToDelete = prev
+                tn.remove()
               }
             }
-
-            if (capsuleToDelete) {
-              e.preventDefault()
-              capsuleToDelete.remove()
-              handleInput()
-              return
+          } else if (container instanceof HTMLElement) {
+            if (offset > 0) {
+              const child = container.childNodes[offset - 1]
+              if (child instanceof HTMLElement && (child.classList.contains('mention') || child.classList.contains('skill-chip'))) {
+                capsuleToDelete = child
+              } else if (child && child.nodeType === Node.TEXT_NODE && /^\s*$/.test(child.textContent ?? '')) {
+                if (offset > 1) {
+                  const prevChild = container.childNodes[offset - 2]
+                  if (prevChild instanceof HTMLElement && (prevChild.classList.contains('mention') || prevChild.classList.contains('skill-chip'))) {
+                    capsuleToDelete = prevChild
+                    ;(child as ChildNode).remove()
+                  }
+                }
+              }
             }
           }
+
+          if (capsuleToDelete) {
+            e.preventDefault()
+            capsuleToDelete.remove()
+            handleInput()
+            return
+          }
+        } else if (e.key === 'Delete') {
+          let capsuleToDelete: HTMLElement | null = null
+          const container = range.startContainer
+          const offset = range.startOffset
+
+          if (container.nodeType === Node.TEXT_NODE) {
+            const tn = container as Text
+            if (offset === tn.data.length) {
+              const next = tn.nextSibling
+              if (next instanceof HTMLElement && (next.classList.contains('mention') || next.classList.contains('skill-chip'))) {
+                capsuleToDelete = next
+              }
+            } else if (offset === 0 && tn.data.length === 1 && /^\s$/.test(tn.data)) {
+              const next = tn.nextSibling
+              if (next instanceof HTMLElement && (next.classList.contains('mention') || next.classList.contains('skill-chip'))) {
+                capsuleToDelete = next
+                tn.remove()
+              }
+            }
+          } else if (container instanceof HTMLElement) {
+            if (offset < container.childNodes.length) {
+              const child = container.childNodes[offset]
+              if (child instanceof HTMLElement && (child.classList.contains('mention') || child.classList.contains('skill-chip'))) {
+                capsuleToDelete = child
+              }
+            }
+          }
+
+          if (capsuleToDelete) {
+            e.preventDefault()
+            capsuleToDelete.remove()
+            handleInput()
+            return
+          }
         }
+      }
+    }
+  }
+
+  const handleClick: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    const target = e.target as HTMLElement | null
+    if (!target) return
+    if (target.classList.contains('capsule-del') || target.closest('.capsule-del')) {
+      e.preventDefault()
+      e.stopPropagation()
+      const capsule = target.closest('.mention, .skill-chip')
+      if (capsule) {
+        capsule.remove()
+        handleInput()
       }
     }
   }
@@ -569,6 +616,7 @@ export function PromptEditor() {
           spellCheck={false}
           onInput={handleInput}
           onKeyDown={handleKeyDown}
+          onClick={handleClick}
           onPaste={handlePaste}
           onDrop={handleDrop}
           role="textbox"

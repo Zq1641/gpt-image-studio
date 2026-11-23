@@ -1,41 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useComposer } from '../state/useComposer'
-
-// print-frame 边长：实测所在列的可用宽×行高后取 min（封顶 560px，防超大屏糊成一片）。
-// 不再写死 400：窗口拉大拉小，正方形永远取“当前空间里最大的合法边长”。
-function usePrintSize(colRef: React.RefObject<HTMLDivElement | null>): number {
-  const [size, setSize] = useState(400)
-  useLayoutEffect(() => {
-    const el = colRef.current
-    if (!el) return
-    const measure = () => {
-      const row = el.parentElement
-      const head = el.parentElement?.querySelector(':scope > .eyebrow')
-      const rowH = row?.clientHeight ?? 400
-      const headH = head instanceof HTMLElement ? head.offsetHeight : 28
-      const w = el.clientWidth
-      // 行高 - header - 列内 gap ≈ 正方形可用高度；列宽即宽度上限
-      const next = Math.max(200, Math.min(560, w, rowH - headH - 2))
-      setSize((prev) => (Math.abs(prev - next) < 1 ? prev : next))
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    if (el.parentElement) ro.observe(el.parentElement)
-    ro.observe(el)
-    window.addEventListener('resize', measure)
-    return () => {
-      ro.disconnect()
-      window.removeEventListener('resize', measure)
-    }
-  }, [colRef])
-  return size
-}
 
 export function PreviewBox() {
   const { state } = useComposer()
   const { previewEntry, status, error } = state
   const colRef = useRef<HTMLDivElement | null>(null)
-  const SIZE = Math.round(usePrintSize(colRef))
   const images = previewEntry?.images ?? []
   const [idx, setIdx] = useState(0)
   // P1-5缩放下界：clamp(0.2,4.0)函数式更新，中心恒中，关闭重置
@@ -108,15 +77,14 @@ export function PreviewBox() {
 
   // -------- gallery (thumbnail) view --------
   const box = (
-    <div className="print" ref={colRef} style={{ width: '100%' }}>
-      <div
-        className="print-frame"
-        style={{ width: SIZE, height: SIZE, padding: 0, position: 'relative' }}
-      >
+    <div className="print" ref={colRef}>
+      <div className="print-frame">
         {isLoading ? (
           <Spinner />
-        ) : isEmpty ? (
+        ) : error ? (
           <EmptyState error={error} />
+        ) : isEmpty ? (
+          <EmptyState />
         ) : (
           <div className="gallery" style={{ transform: `scale(${scale})`, transformOrigin: 'center center' }}>
         {/* P1-5缩放条 */}

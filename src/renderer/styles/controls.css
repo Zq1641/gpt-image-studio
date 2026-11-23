@@ -343,7 +343,7 @@ input:focus {
   border: 1px solid rgba(31, 63, 224, 0.20);
   border-radius: var(--r-xs);
   padding: 1px 6px;
-  margin: 0 1px;
+  margin: 0 2px;
   font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
@@ -351,7 +351,12 @@ input:focus {
   white-space: nowrap;
   vertical-align: 1px;
   user-select: all;
-  cursor: default;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.ce-editor .mention:hover {
+  background: rgba(31, 63, 224, 0.16);
+  border-color: var(--accent);
 }
 
 /* Skill 胶囊：画廊蓝与暖纸深墨水质感，沉稳优雅 */
@@ -372,8 +377,13 @@ input:focus {
   white-space: nowrap;
   vertical-align: 1px;
   user-select: all;
-  cursor: default;
+  cursor: pointer;
   box-shadow: 0 1px 0 rgba(26, 24, 21, 0.04);
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.ce-editor .skill-chip:hover {
+  background: var(--bg-page);
+  border-color: var(--accent);
 }
 .ce-editor .skill-chip::before {
   content: '◆';

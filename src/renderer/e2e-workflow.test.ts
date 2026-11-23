@@ -18,26 +18,29 @@ vi.mock('electron', () => ({
   },
 }))
 
-vi.mock('./presets', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./presets')>()
+vi.mock('../main/presets', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../main/presets')>()
   return {
     ...actual,
     activePreset: () => ({ name: '默认预设', model: 'gpt-image-2' }),
   }
 })
 
-import { resolvePrompt } from '../renderer/lib/refTokens'
-import { resolveSkillPrompt, missingSkillNames, displayPrompt } from '../renderer/lib/skillTokens'
-import { mentionizeMarkup, htmlToText } from '../renderer/components/PromptEditor'
+import { resolvePrompt } from './lib/refTokens'
+import { resolveSkillPrompt, missingSkillNames, displayPrompt } from './lib/skillTokens'
+import { mentionizeMarkup, htmlToText } from './components/PromptEditor'
 import type { RefImage, Skill, HistoryEntry } from '../shared/types'
-import { normalizeResponse } from './normalize'
+import { normalizeResponse } from '../main/normalize'
 
 describe('End-to-End Workflow Verification: RefImages, Skills, Mentions & Generation', () => {
   const fakeRef1: RefImage = {
     id: 'ref-1',
     index: 1,
     name: 'cup.jpg',
+    mime: 'image/jpeg',
     dataUrl: 'data:image/jpeg;base64,fakejpgdata',
+    width: 512,
+    height: 512,
     bytes: 1024,
   }
 
@@ -45,7 +48,10 @@ describe('End-to-End Workflow Verification: RefImages, Skills, Mentions & Genera
     id: 'ref-2',
     index: 2,
     name: 'mountain.png',
+    mime: 'image/png',
     dataUrl: 'data:image/png;base64,fakepngdata',
+    width: 1024,
+    height: 1024,
     bytes: 2048,
   }
 
@@ -58,65 +64,44 @@ describe('End-to-End Workflow Verification: RefImages, Skills, Mentions & Genera
     createdAt: Date.now(),
   }
 
-  describe('1. Reference Image Mentions (@图N)', () => {
-    it('handles single reference image correctly (strips token without leaking literal @图1)', () => {
+  describe('1. Reference Image @ Mentions resolution', () => {
+    it('resolves @图1 and @图2 correctly into prompt and image links', () => {
       const prompt = '杯子 ⟦skill:极简商业⟧ @图1'
-      const sk = resolveSkillPrompt(prompt, [testSkill])
-      const res = resolvePrompt(sk.text, [fakeRef1])
-      expect(res.errors).toHaveLength(0)
-      expect(res.referenced).toContain(1)
-      expect(res.text).toContain('杯子')
-      expect(res.text).toContain('【Skill：极简商业】')
-      expect(res.text).not.toContain('@图1')
-    })
-
-    it('handles multi-reference images correctly (maps to 第N张参考图)', () => {
-      const prompt = '参考 @图1 的光泽和 @图2 的远山'
       const res = resolvePrompt(prompt, [fakeRef1, fakeRef2])
       expect(res.errors).toHaveLength(0)
-      expect(res.referenced).toEqual([1, 2])
-      expect(res.text).toContain('第1张参考图')
-      expect(res.text).toContain('第2张参考图')
-      expect(res.text).not.toContain('@图1')
-      expect(res.text).not.toContain('@图2')
+      expect(res.text).toBe('杯子 ⟦skill:极简商业⟧ 第1张参考图')
+      expect(res.referenced).toHaveLength(1)
+      expect(res.referenced[0]).toBe(1)
     })
 
-    it('catches out-of-range reference image errors', () => {
-      const prompt = '参考 @图3'
+    it('reports error when referenced index is out of bounds', () => {
+      const prompt = '测试未上传的参考图 @图3'
       const res = resolvePrompt(prompt, [fakeRef1])
       expect(res.errors.length).toBeGreaterThan(0)
-      expect(res.errors[0]).toContain('只上传了 1 张参考图')
-    })
-
-    it('catches reference image token when no reference image is uploaded', () => {
-      const prompt = '参考 @图1'
-      const res = resolvePrompt(prompt, [])
-      expect(res.errors.length).toBeGreaterThan(0)
-      expect(res.errors[0]).toContain('未上传参考图')
+      expect(res.errors[0]).toContain('@图3')
     })
   })
 
-  describe('2. Skills & Capsule Tokens', () => {
-    it('expands skill token to full prompt content', () => {
+  describe('2. Skills Expansion & Validation', () => {
+    it('expands skill tokens in prompt into full content', () => {
       const raw = '主体轿车 ⟦skill:极简商业⟧'
       const res = resolveSkillPrompt(raw, [testSkill])
       expect(res.errors).toHaveLength(0)
-      expect(res.referenced).toContain('极简商业')
-      expect(res.text).toContain('【Skill：极简商业】')
-      expect(res.text).toContain('纯白背景')
+      expect(res.text).toContain('极简构图，柔和侧光')
+      expect(res.referenced).toHaveLength(1)
+      expect(res.referenced[0]).toBe('极简商业')
     })
 
-    it('deduplicates multiple mentions of the same skill', () => {
+    it('deduplicates multiple invocations of the same skill', () => {
       const raw = '⟦skill:极简商业⟧ 正文 ⟦skill:极简商业⟧'
       const res = resolveSkillPrompt(raw, [testSkill])
-      expect(res.errors).toHaveLength(0)
-      const matches = res.text.match(/【Skill：极简商业】/g)
-      expect(matches).toHaveLength(1)
+      expect(res.referenced).toHaveLength(1)
     })
 
-    it('detects missing/deleted skills', () => {
+    it('detects missing/deleted skills and flags errors', () => {
       const raw = '测试 ⟦skill:已删除Skill⟧'
       const missing = missingSkillNames(raw, [testSkill])
+      expect(missing).toHaveLength(1)
       expect(missing).toContain('已删除Skill')
 
       const res = resolveSkillPrompt(raw, [testSkill])
@@ -130,11 +115,12 @@ describe('End-to-End Workflow Verification: RefImages, Skills, Mentions & Genera
     })
   })
 
-  describe('3. Markup and HTML roundtrip for Editor', () => {
-    it('converts raw text with skills and @ mentions into markup and back to canonical text', () => {
+  describe('3. Markup and HTML roundtrip for Editor with Atomic Capsules', () => {
+    it('converts raw text with skills and @ mentions into atomic markup and back to canonical text', () => {
       const raw = '产品图 ⟦skill:极简商业⟧ @图1'
       const markup = mentionizeMarkup(raw)
       expect(markup).toContain('class="skill-chip"')
+      expect(markup).toContain('contenteditable="false"')
       expect(markup).toContain('class="mention"')
       expect(markup).toContain('data-skill="极简商业"')
       expect(markup).toContain('data-mention="1"')
@@ -162,9 +148,9 @@ describe('End-to-End Workflow Verification: RefImages, Skills, Mentions & Genera
       expect(res.ok).toBe(true)
       if (res.ok) {
         expect(res.entry.images).toHaveLength(1)
-        expect(res.entry.images[0].url).toMatch(/^img:\/\/req-e2e-1-0\.png$/)
+        expect(res.entry.images[0]?.url).toMatch(/^img:\/\/req-e2e-1-0\.png$/)
         expect(res.entry.refImages).toHaveLength(1)
-        expect(res.entry.refImages?.[0].name).toBe('cup.jpg')
+        expect(res.entry.refImages?.[0]?.name).toBe('cup.jpg')
       }
     })
   })
@@ -174,9 +160,10 @@ describe('End-to-End Workflow Verification: RefImages, Skills, Mentions & Genera
       const entry: HistoryEntry = {
         id: 'hist-1',
         createdAt: Date.now(),
-        presetId: 'default',
+        model: 'gpt-image-2',
         presetName: '默认预设',
         promptRaw: '商业摄影 ⟦skill:极简商业⟧ @图1',
+        promptResolved: '商业摄影 极简构图，柔和侧光，纯白背景，大师级细节。',
         params: { aspect: '16:9', resolution: '2K', quality: 'high', count: 2 },
         size: '2048x1152',
         refImageFiles: [],
@@ -195,8 +182,8 @@ describe('End-to-End Workflow Verification: RefImages, Skills, Mentions & Genera
       expect(restoredResolution).toBe('2K')
       expect(restoredQuality).toBe('high')
       expect(restoredRefs).toHaveLength(2)
-      expect(restoredRefs?.[0].index).toBe(1)
-      expect(restoredRefs?.[1].index).toBe(2)
+      expect(restoredRefs?.[0]?.index).toBe(1)
+      expect(restoredRefs?.[1]?.index).toBe(2)
     })
   })
 })

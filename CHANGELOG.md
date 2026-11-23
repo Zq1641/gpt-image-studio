@@ -4,6 +4,18 @@ All notable changes to **gpt-image-studio** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] · 2026-11-23
+
+### Fixed
+- **提示词胶囊原子化交互修复（Issue 1）**：
+  - `@图N` 与 `⟦skill:NAME⟧` 胶囊标记增加 `contenteditable="false"` 与 `user-select: all`，彻底禁止光标切入胶囊内部或逐字删除单个字符。
+  - 增加 Backspace / Delete 键盘监听，光标位于胶囊前后时一键整体删除整颗胶囊。
+  - 胶囊插入与文本转换自动维护空格边界，用户在胶囊后键入的内容严格作为独立文本节点，不再与胶囊粘连融为一体。
+- **Output 输出区域卡片框架与尺寸自适应修复（Issue 2 & 3）**：
+  - 废弃存在循环尺寸测算与抖动收缩的 `usePrintSize` ResizeObserver 监听，改用稳健纯 CSS Flex 布局。
+  - 彻底移除 `.print-frame` 错误的 `margin-top: auto`，使其与 Archive 列表顶部对齐并等高拉伸，恢复完整的卡片背景边框与阴影。
+  - 修复历史回填后重新生成时图片不显示的视觉阻断问题，确保空状态、生成中 Spinner（Exposing plate）、历史图片以及最新生成的图片在 Output 卡片中无缝切换与即时渲染。
+
 ## [0.3.0] · 2026-11-23
 
 ### Refined & Fixed

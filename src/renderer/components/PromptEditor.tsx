@@ -80,18 +80,17 @@ export function mentionizeMarkup(plain: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-  // Skill 胶囊：只显示名字（全文生成时后台拼入）。
-  // 名字已在入库时去掉 HTML 特殊字符（见 normalizeSkillName），直接匹配即可。
+  // Skill 胶囊：整块原子化（contenteditable="false" 防止内部字符编辑与文字粘连）
   const withSkills = escaped.replace(
     /⟦skill:([^\]⟧\r\n]+)⟧/g,
     (_m, n) => {
       const name = String(n).replace(/["']/g, '')
-      return `<span class="skill-chip" data-skill="${name}">${name}</span>`
+      return `<span class="skill-chip" contenteditable="false" data-skill="${name}">${name}</span>`
     },
   )
   return withSkills.replace(
     /@(?:参考图|图)(\d+)/g,
-    (_m, n) => `<span class="mention" data-mention="${n}">@图${n}</span>`,
+    (_m, n) => `<span class="mention" contenteditable="false" data-mention="${n}">@图${n}</span>`,
   )
 }
 
@@ -100,25 +99,19 @@ export function mentionizeMarkup(plain: string): string {
  *  IMPORTANT: this is the canonical text model — the concatenation of text
  *  nodes ONLY. Chromium's Range.toString() (used for live caret offsets) does
  *  NOT include `<br>` elements NOR div boundaries, and the SHOW_TEXT
- *  TreeWalker (used to map offsets back onto DOM positions) agrees with it.
- *  The previous version translated `<br>` into `\n` — desyncing the three
- *  views by one char per `<br>` and causing off-by-N errors: after the first
- *  mention (which inserts a `<br>`), every later `@图X` was anchored at the
- *  wrong offset and the chip ended up appended at the END of the whole prompt
- *  on a new line, no matter where the user typed `@`. */
+ *  TreeWalker (used to map offsets back onto DOM positions) agrees with it. */
 export function htmlToText(html: string): string {
   if (!html) return ''
   let s = html.replace(/<br\s*\/?>/gi, '')
-  // Skill 胶囊是整段 token 的可视化：span 被删一半/属性丢失时，
-  // 里面的 `◆ 名字` 裸文本不能残留，统一还原成 token 再做完整性收尾。
-  s = s.replace(/<span[^>]*data-skill="([^"]*)"[^>]*>.*?<\/span>/gi, (_m, n) => `⟦skill:${n}⟧`)
-  s = s.replace(/<span[^>]*class="[^"]*skill-chip[^"]*"[^>]*>.*?<\/span>/gi, '')
-  // P0-1 修复：保留 @图N 提及，防止 reference image 链路丢失。
-  // 将 <span class="mention" data-mention="N">@图N</span> 还原为文本 @图N，
-  // 确保 prompt 发送给模型时包含 reference 锚点。
-  s = s.replace(/<span[^>]*class="mention"[^>]*data-mention="(\d+)"[^>]*>(@图\d+)<\/span>/gi, (_m, idx) => `@图${idx}`)
+  // Skill 胶囊是整段 token 的可视化：通过 data-skill 属性恢复
+  s = s.replace(/<span[^>]*data-skill="([^"]*)"[^>]*>[\s\S]*?<\/span>/gi, (_m, n) => `⟦skill:${n}⟧`)
+  s = s.replace(/<span[^>]*class="[^"]*skill-chip[^"]*"[^>]*>[\s\S]*?<\/span>/gi, '')
+  // @图N 提及：通过 data-mention 属性恢复
+  s = s.replace(/<span[^>]*data-mention="(\d+)"[^>]*>[\s\S]*?<\/span>/gi, (_m, idx) => `@图${idx}`)
+  s = s.replace(/<span[^>]*class="[^"]*mention[^"]*"[^>]*>[\s\S]*?<\/span>/gi, '')
   s = s.replace(/<[^>]+>/g, '')
   s = s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  s = s.replace(/\u200B/g, '')
   // 残缺 token 收尾：胶囊只删了一半时会剩下 `⟦skill:名字` / `名字⟧` 碎片，
   // 统一清除，保证文本模型里要么是完整 token、要么什么都没有。
   s = s.replace(/⟦skill:[^\]⟧\r\n]*$/g, '')
@@ -411,6 +404,7 @@ export function PromptEditor() {
 
     const mention = document.createElement('span')
     mention.className = 'mention'
+    mention.setAttribute('contenteditable', 'false')
     mention.setAttribute('data-mention', String(indexOneBased))
     mention.textContent = `@图${indexOneBased}`
     // The trailing space keeps the chip from gluing onto the next word and
@@ -448,6 +442,73 @@ export function PromptEditor() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape' && mentionMenu.open) {
       setMentionMenu((m) => ({ ...m, open: false }))
+      return
+    }
+
+    // 胶囊整块原子化删除保护：当光标处于胶囊前后时，Backspace 或 Delete 一键整体移除胶囊，
+    // 防止删除胶囊内单个文字或光标渗入胶囊。
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      const sel = window.getSelection()
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0)
+        if (range.collapsed) {
+          if (e.key === 'Backspace') {
+            let capsuleToDelete: HTMLElement | null = null
+            const container = range.startContainer
+            const offset = range.startOffset
+
+            if (container.nodeType === Node.TEXT_NODE) {
+              if (offset === 0) {
+                const prev = container.previousSibling
+                if (prev instanceof HTMLElement && (prev.classList.contains('mention') || prev.classList.contains('skill-chip'))) {
+                  capsuleToDelete = prev
+                }
+              }
+            } else if (container instanceof HTMLElement) {
+              if (offset > 0) {
+                const child = container.childNodes[offset - 1]
+                if (child instanceof HTMLElement && (child.classList.contains('mention') || child.classList.contains('skill-chip'))) {
+                  capsuleToDelete = child
+                }
+              }
+            }
+
+            if (capsuleToDelete) {
+              e.preventDefault()
+              capsuleToDelete.remove()
+              handleInput()
+              return
+            }
+          } else if (e.key === 'Delete') {
+            let capsuleToDelete: HTMLElement | null = null
+            const container = range.startContainer
+            const offset = range.startOffset
+
+            if (container.nodeType === Node.TEXT_NODE) {
+              if (offset === (container as Text).data.length) {
+                const next = container.nextSibling
+                if (next instanceof HTMLElement && (next.classList.contains('mention') || next.classList.contains('skill-chip'))) {
+                  capsuleToDelete = next
+                }
+              }
+            } else if (container instanceof HTMLElement) {
+              if (offset < container.childNodes.length) {
+                const child = container.childNodes[offset]
+                if (child instanceof HTMLElement && (child.classList.contains('mention') || child.classList.contains('skill-chip'))) {
+                  capsuleToDelete = child
+                }
+              }
+            }
+
+            if (capsuleToDelete) {
+              e.preventDefault()
+              capsuleToDelete.remove()
+              handleInput()
+              return
+            }
+          }
+        }
+      }
     }
   }
 

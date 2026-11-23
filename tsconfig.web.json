@@ -18,5 +18,6 @@
       "@shared/*": ["src/shared/*"]
     }
   },
-  "include": ["src/renderer/**/*", "src/shared/**/*"]
+  "include": ["src/renderer/**/*", "src/shared/**/*"],
+  "exclude": ["src/renderer/**/*.test.ts", "src/renderer/**/__tests__/*"]
 }

@@ -485,7 +485,8 @@ input:focus {
   color: var(--text-1);
   text-align: left;
 }
-.mention-menu button:hover {
+.mention-menu button:hover,
+.mention-menu button.is-selected {
   background: var(--bg-hover);
 }
 .mention-menu button .num {

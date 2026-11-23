@@ -13,7 +13,7 @@ export function skillTokenFor(name: string): string {
   return `⟦skill:${name}⟧`
 }
 export function chipTextFor(name: string): string {
-  return `◆ ${name}`
+  return name
 }
 export function shortToLongCaret(longText: string, shortCaret: number): number {
   if (shortCaret <= 0) return shortCaret
@@ -24,7 +24,7 @@ export function shortToLongCaret(longText: string, shortCaret: number): number {
     const name = m[1] ?? ''
     const longStart = m.index
     const shortStart = longStart - delta
-    const chipLen = 2 + name.length
+    const chipLen = name.length
     if (shortCaret < shortStart) break
     if (shortCaret === shortStart) return longStart
     if (shortCaret <= shortStart + chipLen) return longStart + m[0].length
@@ -43,12 +43,12 @@ export function longToShortOffset(longText: string, longIdx: number): number {
     if (longIdx < longEnd2) {
       if (longIdx >= longStart2) {
         const nm = m2[1] ?? ''
-        return longStart2 - delta2 + 2 + nm.length
+        return longStart2 - delta2 + nm.length
       }
       break
     }
     const nm2 = m2[1] ?? ''
-    delta2 += m2[0].length - (2 + nm2.length)
+    delta2 += m2[0].length - nm2.length
   }
   return longIdx - delta2
 }
@@ -243,6 +243,7 @@ export function PromptEditor() {
   // only when the live selection is unavailable (React re-render / IME).
   const lastCaretRef = useRef(0)
   const isComposingRef = useRef(false)
+  const [selectedMenuIdx, setSelectedMenuIdx] = useState(0)
   const [mentionMenu, setMentionMenu] = useState<{
     open: boolean
     atStart: number
@@ -292,11 +293,6 @@ export function PromptEditor() {
     lastWrittenRef.current = text
     setPrompt(text)
 
-    if (refImages.length === 0) {
-      setMentionMenu((m2) => ({ ...m2, open: false }))
-      return
-    }
-
     const live = caretTextOffset(el)
     if (live >= 0) lastCaretRef.current = live
 
@@ -311,17 +307,25 @@ export function PromptEditor() {
     try {
       const sel = window.getSelection()
       if (sel && sel.rangeCount > 0) {
-        const r = sel.getRangeAt(0).getBoundingClientRect()
-        if (r.width > 0 || r.height > 0) {
+        let r = sel.getRangeAt(0).getBoundingClientRect()
+        if (r.height === 0 && r.width === 0) {
+          const range = sel.getRangeAt(0)
+          if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0) {
+            const tempRange = range.cloneRange()
+            tempRange.setStart(range.startContainer, range.startOffset - 1)
+            r = tempRange.getBoundingClientRect()
+          }
+        }
+        if (r.height > 0 || r.width > 0) {
           topPx = r.bottom + window.scrollY + 4
-          leftPx = r.left + window.scrollX + 12
+          leftPx = r.left + window.scrollX
         }
       }
     } catch { /* ignore */ }
     if (topPx === 0 && leftPx === 0) {
       const rect = el.getBoundingClientRect()
-      topPx = rect.bottom + window.scrollY + 4
-      leftPx = rect.left + window.scrollX + 12
+      topPx = rect.top + 40
+      leftPx = rect.left + 20
     }
 
     setMentionMenu({
@@ -332,6 +336,7 @@ export function PromptEditor() {
       left: leftPx,
       query,
     })
+    setSelectedMenuIdx(0)
   }
 
   // -------------------- 插入 mention --------------------
@@ -361,6 +366,16 @@ export function PromptEditor() {
     const start = findTextPos(el, longToShortOffset(text, realStart))
     const end = findTextPos(el, longToShortOffset(text, realEnd))
     if (!start || !end) return
+
+    // 胶囊边界保护：若 start 落在前一个胶囊内部或结尾，自动推进到胶囊后首个普通文本节点，
+    // 防止 Range 操作污染或切断前置的 skill 胶囊。
+    if (start.offset >= start.node.data.length || start.node.parentElement?.closest('.skill-chip, .mention')) {
+      const next = nextTextNodeAfter(el, start.node)
+      if (next) {
+        start.node = next
+        start.offset = 0
+      }
+    }
 
     el.focus()
 
@@ -440,9 +455,29 @@ export function PromptEditor() {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Escape' && mentionMenu.open) {
-      setMentionMenu((m) => ({ ...m, open: false }))
-      return
+    if (mentionMenu.open) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionMenu((m) => ({ ...m, open: false }))
+        return
+      }
+      if (refImages.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          setSelectedMenuIdx((idx) => (idx + 1) % refImages.length)
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          setSelectedMenuIdx((idx) => (idx - 1 + refImages.length) % refImages.length)
+          return
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault()
+          insertMention(selectedMenuIdx + 1)
+          return
+        }
+      }
     }
 
     // 胶囊整块原子化删除保护：当光标处于胶囊前后时，Backspace 或 Delete 一键整体移除胶囊，
@@ -571,19 +606,26 @@ export function PromptEditor() {
           style={{ top: mentionMenu.top, left: mentionMenu.left }}
         >
           <div className="menu-eyebrow">选择参考图 · Pick a plate</div>
-          {refImages.map((r, i) => (
-            <button key={r.id} type="button"
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-              onClick={(e) => { e.stopPropagation(); insertMention(i + 1) }}
-            >
-              <img src={r.dataUrl} alt="" style={{
-                width: 32, height: 32, borderRadius: 'var(--r-xs)', objectFit: 'cover',
-                border: '1px solid var(--line)',
-              }} />
-              <span className="num">#{String(i + 1).padStart(2, '0')}</span>
-              <span className="name">{r.name}</span>
-            </button>
-          ))}
+          {refImages.length === 0 ? (
+            <div style={{ padding: '8px 12px', fontSize: 'var(--small-size, 11px)', color: 'var(--text-3)' }}>
+              未检测到参考图，请先在左侧上传图片
+            </div>
+          ) : (
+            refImages.map((r, i) => (
+              <button key={r.id} type="button"
+                className={selectedMenuIdx === i ? 'is-selected' : ''}
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+                onClick={(e) => { e.stopPropagation(); insertMention(i + 1) }}
+              >
+                <img src={r.dataUrl} alt="" style={{
+                  width: 32, height: 32, borderRadius: 'var(--r-xs)', objectFit: 'cover',
+                  border: '1px solid var(--line)',
+                }} />
+                <span className="num">#{String(i + 1).padStart(2, '0')}</span>
+                <span className="name">{r.name}</span>
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>

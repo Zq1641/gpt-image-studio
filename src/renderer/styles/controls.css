@@ -358,7 +358,7 @@ input:focus {
 .ce-editor .skill-chip {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   color: var(--text-1);
   background: var(--bg-hover);
   border: 1px solid var(--line-strong);
@@ -375,7 +375,8 @@ input:focus {
   cursor: default;
   box-shadow: 0 1px 0 rgba(26, 24, 21, 0.04);
 }
-.ce-editor .skill-chip .symbol {
+.ce-editor .skill-chip::before {
+  content: '◆';
   color: var(--accent);
   font-size: 10px;
 }

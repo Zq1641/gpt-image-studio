@@ -4,7 +4,17 @@ All notable changes to **gpt-image-studio** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] · 2026-11-23
+
+### Refined & Fixed
+- **Studio Notebook 视觉与排版重构**：完整恢复暖纸质感与深墨色调（`#F4F1EA` / `#1A1815`），修复 `layout.css` 中基础字体的继承缺失。
+- **左栏 Sidebar 紧凑排版**：模型展示恢复 Fraunces 衬线体大字，收敛标签云墙为小巧快速切换菜单；尺寸与细节控制整合为单行紧凑胶囊（`[Auto | 1K | 2K | 4K | 6K | 8K | +]`），彻底消灭左栏滚动条。
+- **Presets 与 Skills 双模合一**：右上角增加极简标签切换，找回 5 大经典灵感模板（电商、摄影、海报、创意、艺术），并无缝支持用户上传的自定义纯文本 Skills。
+- **Prompt Skill 胶囊去噪**：废除刺眼的大红背景，改用暖纸墨水灰底配合画廊蓝（`#1F3FE0`）`◆` 标志装饰，与正文及 `@图1` 完美融入。
+- **底部 Output 与 Archive 严格对齐**：去除 Archive 列表强制的 1:1 比例锁死，恢复自然拉伸与内部平滑滚动；Output 配备磨砂质感放大镜工具条。
+- **网络与图片下载稳定性增强**：针对 GPT Image 2.6 及各类中转接口，增加 Axios 自动跟随重定向与流式下载兜底，彻底解决中转返回 URL 时的下载超时与报错。
+
+## [0.2.0] · 2026-11-13
 
 ### Added
 - Skills（右上角，替换原 Presets 模板区）：上传 `.md` / `.txt` 纯文本 skill，

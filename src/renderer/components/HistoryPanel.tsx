@@ -66,25 +66,12 @@ export function HistoryPanel() {
       </div>
 
       {history.length === 0 ? (
-        <div className="archive-list" style={{
-          aspectRatio: '1 / 1',
-          maxWidth: '100%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexDirection: 'column', gap: 8,
-        }}>
-          <div style={{
-            fontFamily: 'var(--font-display)', fontStyle: 'italic',
-            fontSize: 24, color: 'var(--text-3)',
-          }}>empty archive</div>
-          <div className="output-empty">暂无输出 · Generate something to begin</div>
-          <div style={{
-            fontFamily: 'var(--font-mono)', fontSize: 10,
-            letterSpacing: 'var(--track-loose)', textTransform: 'uppercase',
-            color: 'var(--text-3)',
-          }}>Generate something to begin</div>
+        <div className="archive-list archive-empty">
+          <div className="archive-empty-title">empty archive</div>
+          <div className="archive-empty-sub">Generate something to begin</div>
         </div>
       ) : (
-        <div className="archive-list" style={{ aspectRatio: '1 / 1', maxWidth: '100%' }}>
+        <div className="archive-list">
           {visible.map((h, i) => (
             <ArchiveRow
               key={h.id}

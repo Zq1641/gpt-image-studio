@@ -7,65 +7,24 @@ body,
   background: transparent;
 }
 
-/* 比例缩放：当窗口宽度变化时，通过 --scale-factor 变量统一缩放所有元素。
-   通过 meta viewport + JS 动态计算，确保布局、字体、卡片等所有元素等比例缩放。
-   当窗口宽度在 640px-2560px 之间时，scale factor 线性映射为 0.8-1.6。
-   低于 640px 时强制 0.8（最小），高于 2560px 强制 1.6（最大）。 */
-:root {
-  --scale-factor: 1;
+body {
+  font-family: var(--font-body);
+  font-size: var(--body-size);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  letter-spacing: 0.005em;
 }
 
-/* 强制所有继承了 body 字体大小的元素 respect 缩放因子 —— 通过 css 变量实现等比例 */
-body *,
-body *::before,
-body *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
-}
-
-/* 当窗口大小变化时，通过 CSS variable 触发重新计算 */
-@media (pointer: fine) {
-  @supports ((--scale-factor: 1)) {
-    html {
-      --scale-factor: calc(
-        min(
-          1.6,
-          max(
-            0.8,
-            0.8 + (100vw - 640px) * 0.8 / 1920
-          )
-        )
-      );
-    }
-  }
 }
 
 #root {
   display: flex;
   flex-direction: column;
-  --scale-factor: calc(
-    min(
-      1.6,
-      max(
-        0.8,
-        0.8 + (100vw - 640px) * 0.8 / 1920
-      )
-    )
-  );
-}
-
-/* 确保输出/print column 在窗口缩放时保持位置稳定，防止位移 */
-.print-col {
-  flex: 0 0 auto;
-  width: calc(100% / 2 * var(--scale-factor));
-  min-width: 300px;
-  max-width: 500px;
-  box-sizing: border-box;
-}
-
-.archive-col {
-  flex: 1 1 auto;
-  min-width: 0;
-  box-sizing: border-box;
 }
 
 /* Drag strip for hiddenInset — keep transparent to let vibrancy show */
@@ -275,7 +234,7 @@ body *::after {
   display: flex;
   flex-direction: column;
   gap: 0;
-  flex: 0 0 auto;
+  min-width: 0;
   align-self: stretch;
 }
 .archive-col {

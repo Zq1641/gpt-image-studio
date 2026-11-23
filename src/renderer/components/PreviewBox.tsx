@@ -140,10 +140,10 @@ export function PreviewBox() {
         )}
 
         {!isEmpty && !isLoading && (
-          <div className="gallery-zoombar" style={{ position: 'absolute', right: 8, top: 8, display: 'flex', gap: 4 }}>
-            <button type="button" aria-label="缩小" onClick={(e) => { e.stopPropagation(); zoomBy(-0.2) }}>−</button>
-            <button type="button" aria-label="放大" onClick={(e) => { e.stopPropagation(); zoomBy(0.2) }}>＋</button>
-            <button type="button" aria-label="重置" onClick={(e) => { e.stopPropagation(); console.log('[zoom] reset'); setScale(1) }}>1:1</button>
+          <div className="gallery-zoombar">
+            <button type="button" aria-label="缩小" title="缩小" onClick={(e) => { e.stopPropagation(); zoomBy(-0.2) }}>−</button>
+            <button type="button" aria-label="放大" title="放大" onClick={(e) => { e.stopPropagation(); zoomBy(0.2) }}>＋</button>
+            <button type="button" aria-label="重置" title="重置 1:1" onClick={(e) => { e.stopPropagation(); setScale(1) }}>1:1</button>
           </div>
         )}
         {/* Print label — sits on the frame border. */}

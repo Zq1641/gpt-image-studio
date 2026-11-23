@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Quality, Resolution } from '@shared/types'
 import { getSupportedQualities } from '@shared/types'
 import { useComposer } from '../state/useComposer'
@@ -23,55 +24,77 @@ export function ResolutionSegments() {
   const active = state.settings.presets.find((p) => p.id === state.settings.activePresetId)
   const qualities = getSupportedQualities(active?.model ?? '')
 
-  // WxH 自定义：不在基础档里时末尾透出一块 custom chip，避免选中态丢失
-  const sizes: Resolution[] = SIZE_BASE.includes(params.resolution)
-    ? SIZE_BASE
-    : [...SIZE_BASE, params.resolution]
+  const [customOpen, setCustomOpen] = useState(false)
+  const [customInput, setCustomInput] = useState('')
 
-  const pickWxH = () => {
-    const cur = isWxH(params.resolution) ? params.resolution : '1024x1536'
-    const input = window.prompt('自定义尺寸 WxH，例如 1024x1536', cur)
-    if (!input) return
-    const v = input.trim()
+  const handleCustomSubmit = () => {
+    const v = customInput.trim()
     if (!isWxH(v)) {
-      window.alert('格式不对，用 WxH，例如 1024x1536')
+      alert('格式不对，请输入类似 1024x1536 的自定义分辨率')
       return
     }
     setParam('resolution', v as Resolution)
+    setCustomOpen(false)
   }
 
+  const isCustomSize = isWxH(params.resolution)
+
   return (
-    <div className="field seg-field">
-      <span className="field-label">分辨率</span>
-      <div className="seg-stack">
-        <div className="segments seg-grid seg-grid-size" role="tablist" aria-label="尺寸">
-          {sizes.map((r) => {
-            const label = r === 'auto' ? 'Auto' : isWxH(r) ? r : r
-            const custom = isWxH(r)
-            return (
-              <button
-                key={r}
-                type="button"
-                role="tab"
-                aria-selected={params.resolution === r}
-                className={params.resolution === r ? 'is-active' : ''}
-                title={custom ? `${r}（自定义尺寸）` : r}
-                onClick={() => setParam('resolution', r)}
-              >
-                {label}
-              </button>
-            )
-          })}
+    <div className="field format-field">
+      <div className="format-group">
+        <div className="format-label-row">
+          <span className="field-label">尺寸 SIZE</span>
+          {isCustomSize && <span className="custom-size-badge">{params.resolution}</span>}
+        </div>
+        <div className="segments seg-compact" role="tablist" aria-label="尺寸">
+          {SIZE_BASE.map((r) => (
+            <button
+              key={r}
+              type="button"
+              role="tab"
+              aria-selected={params.resolution === r}
+              className={params.resolution === r ? 'is-active' : ''}
+              onClick={() => { setCustomOpen(false); setParam('resolution', r) }}
+            >
+              {r === 'auto' ? 'Auto' : r}
+            </button>
+          ))}
           <button
             type="button"
-            title="自定义 WxH 尺寸"
-            onClick={pickWxH}
+            className={`btn-custom-toggle ${isCustomSize ? 'is-active' : ''}`}
+            title="自定义尺寸 WxH"
+            onClick={() => {
+              setCustomInput(isCustomSize ? params.resolution : '1024x1536')
+              setCustomOpen(!customOpen)
+            }}
           >
-            +
+            {isCustomSize ? '✎' : '+'}
           </button>
         </div>
+        {customOpen && (
+          <div className="custom-size-popover">
+            <input
+              type="text"
+              placeholder="宽x高 例如 1024x1536"
+              value={customInput}
+              autoFocus
+              onChange={(e) => setCustomInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCustomSubmit()
+                if (e.key === 'Escape') setCustomOpen(false)
+              }}
+            />
+            <button type="button" className="pill" onClick={handleCustomSubmit}>确定</button>
+            <button type="button" className="pill" onClick={() => setCustomOpen(false)}>取消</button>
+          </div>
+        )}
+      </div>
 
-        <div className="segments seg-grid seg-grid-quality" role="tablist" aria-label="细节">
+      <div className="format-group" style={{ marginTop: 8 }}>
+        <div className="format-label-row">
+          <span className="field-label">细节 QUALITY</span>
+        </div>
+        <div className="segments seg-compact" role="tablist" aria-label="细节">
           {qualities.map((q) => (
             <button
               key={q}

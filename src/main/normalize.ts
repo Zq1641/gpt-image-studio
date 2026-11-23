@@ -38,7 +38,7 @@ const URL_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
 async function downloadIfUrl(url: string): Promise<{ data: Buffer; mime: string } | { ok: false }> {
   try {
     const { net } = await import('electron')
-    return await new Promise((resolve) => {
+    const res = await new Promise<{ data: Buffer; mime: string } | { ok: false }>((resolve) => {
       let settled = false
       const done = (v: { data: Buffer; mime: string } | { ok: false }) => {
         if (settled) return
@@ -50,11 +50,16 @@ async function downloadIfUrl(url: string): Promise<{ data: Buffer; mime: string 
         try { (req as unknown as { abort?: () => void }).abort?.() } catch { /* ignore */ }
         done({ ok: false })
       }, URL_DOWNLOAD_TIMEOUT_MS)
-      const req = net.request({ url, method: 'GET' })
+      const req = net.request({ url, method: 'GET', redirect: 'follow' })
       const chunks: Buffer[] = []
       let received = 0
       let mime = 'image/png'
       req.on('response', (resp) => {
+        const status = resp.statusCode
+        if (typeof status === 'number' && (status < 200 || status >= 400)) {
+          done({ ok: false })
+          return
+        }
         // Content-Length 先验：超限直接掐掉，连 body 都不收
         const cl = resp.headers['content-length']
         const declared = Array.isArray(cl) ? cl[0] : cl
@@ -77,13 +82,29 @@ async function downloadIfUrl(url: string): Promise<{ data: Buffer; mime: string 
           chunks.push(c as Buffer)
         })
         resp.on('end', () => done({ data: Buffer.concat(chunks), mime }))
-        resp.on('error', () => done({ ok: false } as never))
+        resp.on('error', () => done({ ok: false }))
       })
-      req.on('error', () => done({ ok: false } as never))
+      req.on('error', () => done({ ok: false }))
       req.end()
     })
-  } catch {
-    return { ok: false } as never
+    if (!('ok' in res && res.ok === false)) {
+      return res
+    }
+  } catch { /* fallback to axios */ }
+
+  try {
+    const axios = (await import('axios')).default
+    const resp = await axios.get<ArrayBuffer>(url, {
+      responseType: 'arraybuffer',
+      timeout: URL_DOWNLOAD_TIMEOUT_MS,
+      maxContentLength: URL_DOWNLOAD_MAX_BYTES,
+      maxBodyLength: URL_DOWNLOAD_MAX_BYTES,
+    })
+    const mime = (resp.headers['content-type'] as string)?.split(';')[0] || 'image/png'
+    return { data: Buffer.from(resp.data), mime }
+  } catch (e) {
+    console.error('[downloadIfUrl] download failed for URL:', url.slice(0, 80), e)
+    return { ok: false }
   }
 }
 

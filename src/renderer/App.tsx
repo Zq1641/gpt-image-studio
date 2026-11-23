@@ -10,9 +10,12 @@ export function App() {
     const stop = (e: DragEvent) => { e.preventDefault() }
     window.addEventListener('dragover', stop)
     window.addEventListener('drop', stop)
+    const onOpen = () => setSettingsOpen(true)
+    window.addEventListener('open-settings', onOpen)
     return () => {
       window.removeEventListener('dragover', stop)
       window.removeEventListener('drop', stop)
+      window.removeEventListener('open-settings', onOpen)
     }
   }, [])
 

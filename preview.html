@@ -92,38 +92,28 @@
       <aside class="sidebar">
         <div class="sidebar-section">
           <div class="eyebrow">Issue № 01</div>
-          <!-- ③ ModelDisplay 新版 -->
           <div class="model-block">
             <div class="model-display">
-              <span class="model-name" id="modelName">gpt-image-2</span>
-              <span class="model-sub">model · 默认预设</span>
-            </div>
-            <div><span class="feat-tag">③</span><span class="feat-hint">模型预设直选 + 同样式“+”添加（无下拉框）</span></div>
-            <div class="model-chips" id="modelChips">
-              <span class="model-chip is-active"><button type="button" class="model-chip-name" onclick="pickModelChip(this)">gpt-image-2</button><button type="button" class="model-chip-x" onclick="requestDeleteChip(this)">×</button></span>
-              <span class="model-chip"><button type="button" class="model-chip-name" onclick="pickModelChip(this)">gpt-image-1</button><button type="button" class="model-chip-x" onclick="requestDeleteChip(this)">×</button></span>
-              <span class="model-chip"><button type="button" class="model-chip-name" onclick="pickModelChip(this)">dall-e-3</button><button type="button" class="model-chip-x" onclick="requestDeleteChip(this)">×</button></span>
-              <span class="model-chip"><button type="button" class="model-chip-name" onclick="pickModelChip(this)">dall-e-2</button><button type="button" class="model-chip-x" onclick="requestDeleteChip(this)">×</button></span>
-              <button type="button" class="model-chip is-add" onclick="toggleModelAdd()" title="手动添加模型">+</button>
-            </div>
-            <div class="model-confirm hidden" id="modelConfirmRow">
-              <span class="model-confirm-text">移除 <span class="name" id="modelConfirmName"></span>？</span>
-              <span class="model-confirm-actions">
-                <button type="button" class="pill danger" onclick="confirmDeleteChip()">确认删除</button>
-                <button type="button" class="pill" onclick="cancelDeleteChip()">取消</button>
-              </span>
-            </div>
-            <div class="model-add hidden" id="modelAddRow">
-              <input type="text" id="modelDraft" placeholder="例如：gpt-image-2-turbo" />
-              <div class="model-add-actions">
-                <button type="button" class="pill" onclick="toggleModelAdd()">取消</button>
-                <button type="button" class="pill" onclick="commitModel()">添加</button>
+              <div class="model-name-row">
+                <span class="model-name" id="modelName">gpt-image-2.6</span>
+              </div>
+              <div class="model-sub-row">
+                <span class="model-sub">model · 默认预设</span>
+                <div class="model-picker-badge" title="快速切换当前预设模型">
+                  <select class="model-native-select" onchange="pickModel(this.value)">
+                    <option value="gpt-image-2.6">gpt-image-2.6</option>
+                    <option value="gpt-image-2.5">gpt-image-2.5</option>
+                    <option value="gpt-image-2">gpt-image-2</option>
+                    <option value="dall-e-3">dall-e-3</option>
+                  </select>
+                  <span class="model-picker-trigger">切换 ▾</span>
+                </div>
               </div>
             </div>
           </div>
           <div class="preset">
             <select class="preset-select"><option>默认预设</option><option>主力中转站</option></select>
-            <div class="preset-price"><span class="amount">¥0.05</span><span class="unit">/ image</span></div>
+            <div class="preset-price"><span class="amount">¥0.03</span><span class="unit">/ image</span></div>
           </div>
         </div>
         <div class="sidebar-section">
@@ -134,12 +124,33 @@
             <button type="button" class="is-active">1:1</button><button type="button">3:4</button>
             <button type="button">2:3</button><button type="button">9:16</button>
           </div>
-          <div class="field">
-            <span class="field-label">分辨率</span>
-            <div class="dual-segments">
-              <div class="segments"><button type="button" class="is-active">1K</button><button type="button">2K</button><button type="button">4K</button></div>
-              <span class="dual-segments-divider"></span>
-              <div class="segments"><button type="button">Low</button><button type="button" class="is-active">Med</button><button type="button">High</button></div>
+          <div class="format-field">
+            <div class="format-group">
+              <div class="format-label-row">
+                <span class="field-label">尺寸 SIZE</span>
+              </div>
+              <div class="segments seg-compact">
+                <button type="button">Auto</button>
+                <button type="button" class="is-active">1K</button>
+                <button type="button">2K</button>
+                <button type="button">4K</button>
+                <button type="button">6K</button>
+                <button type="button">8K</button>
+                <button type="button" class="btn-custom-toggle" title="自定义尺寸">+</button>
+              </div>
+            </div>
+            <div class="format-group" style="margin-top: 8px;">
+              <div class="format-label-row">
+                <span class="field-label">细节 QUALITY</span>
+              </div>
+              <div class="segments seg-compact">
+                <button type="button">Auto</button>
+                <button type="button">Low</button>
+                <button type="button" class="is-active">Med</button>
+                <button type="button">High</button>
+                <button type="button">XHigh</button>
+                <button type="button">Max</button>
+              </div>
             </div>
           </div>
         </div>
@@ -179,7 +190,12 @@
             </div></div>
           </div>
           <div class="templates-col">
-            <div class="eyebrow"><span>Presets</span><span style="margin-left:auto;color:var(--text-3)">5</span></div>
+            <div class="eyebrow" style="display:flex;align-items:center;justify-content:space-between">
+              <div class="tab-pill-group">
+                <button type="button" class="tab-pill is-active">Presets <span class="num">5</span></button>
+                <button type="button" class="tab-pill">Skills <span class="num">2</span></button>
+              </div>
+            </div>
             <div class="toc">
               <button type="button" class="toc-item"><span class="toc-num">01</span><span class="toc-text"><span class="toc-label">电商</span><span class="toc-en">E-commerce</span></span></button>
               <button type="button" class="toc-item"><span class="toc-num">02</span><span class="toc-text"><span class="toc-label">摄影</span><span class="toc-en">Photography</span></span></button>
@@ -212,7 +228,7 @@
                 </div>
               </div>
               <div class="feat-hint" style="padding:2px 4px 6px">⑥ 上下对齐 · archive-list 拉伸至与 print-frame 同高（内部滚动）</div>
-              <div class="archive-list" style="width:400px;">
+              <div class="archive-list">
                 <div class="archive-item" onclick="refillDemo(this)">
                   <div class="idx">№<br /><span class="n">0003</span></div>
                   <div class="ts">2026.09.10 10:24<span class="preset">默认预设</span></div>

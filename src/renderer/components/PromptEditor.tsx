@@ -86,7 +86,7 @@ export function mentionizeMarkup(plain: string): string {
     /⟦skill:([^\]⟧\r\n]+)⟧/g,
     (_m, n) => {
       const name = String(n).replace(/["']/g, '')
-      return `<span class="skill-chip" data-skill="${name}">◆ ${name}</span>`
+      return `<span class="skill-chip" data-skill="${name}"><span class="symbol">◆</span> ${name}</span>`
     },
   )
   return withSkills.replace(

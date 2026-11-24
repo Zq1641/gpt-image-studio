@@ -17312,7 +17312,7 @@ var RATIO = {
   "2:3": [2, 3],
   "9:16": [9, 16]
 };
-var LONG_EDGE = { "1K": 1024, "2K": 2048, "4K": 4096 };
+var LONG_EDGE = { "1K": 1024, "2K": 2048, "4K": 4096, "6K": 6144, "8K": 8192 };
 function snap64(n) {
   return Math.max(64, Math.round(n / 64) * 64);
 }
@@ -17345,7 +17345,7 @@ function isAspect(v) {
   return typeof v === "string" && ASPECTS.includes(v);
 }
 function isResolution(v) {
-  if (v === "auto" || v === "1K" || v === "2K" || v === "4K") return true;
+  if (v === "auto" || v === "1K" || v === "2K" || v === "4K" || v === "6K" || v === "8K") return true;
   return typeof v === "string" && /^\d+x\d+$/.test(v);
 }
 function isQuality(v, model) {
@@ -17362,7 +17362,7 @@ function parseHeadlessParams(input, model) {
   const aspect = input.aspect ?? "1:1";
   if (!isAspect(aspect)) return { ok: false, message: "\u975E\u6CD5 aspect" };
   const resolution = input.resolution ?? "auto";
-  if (!isResolution(resolution)) return { ok: false, message: "\u975E\u6CD5 resolution\uFF0C\u4EC5\u652F\u6301 auto/1K/2K/4K/WxH" };
+  if (!isResolution(resolution)) return { ok: false, message: "\u975E\u6CD5 resolution\uFF0C\u4EC5\u652F\u6301 auto/1K/2K/4K/6K/8K/WxH" };
   const m = model ?? (typeof input.model === "string" ? input.model : void 0);
   const quality = input.quality ?? "medium";
   if (!isQuality(quality, m)) return { ok: false, message: "\u975E\u6CD5 quality\uFF0C\u8001\u56DB\u6A21\u578B\u4EC5 auto/low/medium/high\uFF0C2.6\u652F\u6301\u516D\u6863" };

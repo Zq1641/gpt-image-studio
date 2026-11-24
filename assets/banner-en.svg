@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif">
+  <defs>
+    <linearGradient id="topBar" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1F3FE0"/>
+      <stop offset="100%" stop-color="#4F6DF5"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#1A1815" flood-opacity="0.08"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1A1815" flood-opacity="0.04"/>
+    </filter>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="rgba(26,24,21,0.05)"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="520" fill="#F4F1EA"/>
+  <rect width="1200" height="520" fill="url(#grid)"/>
+  <rect x="0" y="0" width="1200" height="8" fill="url(#topBar)"/>
+
+  <!-- Left Column: Hero Typography & Info -->
+  <g transform="translate(70, 48)">
+    <!-- Badges Row -->
+    <g transform="translate(0, 0)">
+      <rect x="0" y="0" width="88" height="26" rx="13" fill="#1F3FE0" fill-opacity="0.1"/>
+      <text x="44" y="17" font-size="11" font-weight="700" fill="#1F3FE0" text-anchor="middle" letter-spacing="1">v0.3.2</text>
+
+      <rect x="96" y="0" width="148" height="26" rx="13" fill="rgba(26,24,21,0.06)"/>
+      <text x="170" y="17" font-size="11" font-weight="600" fill="#5C564E" text-anchor="middle" letter-spacing="0.5">macOS · Apple Silicon</text>
+
+      <rect x="252" y="0" width="102" height="26" rx="13" fill="rgba(46,125,67,0.1)"/>
+      <text x="303" y="17" font-size="11" font-weight="600" fill="#2E7D43" text-anchor="middle" letter-spacing="0.5">Open Source</text>
+    </g>
+
+    <!-- Main Title -->
+    <text x="0" y="82" font-family="Georgia, 'Times New Roman', serif" font-size="44" font-weight="700" fill="#1A1815" letter-spacing="-0.5">
+      gpt-image · studio
+    </text>
+
+    <!-- Catchphrase -->
+    <text x="0" y="130" font-family="Georgia, 'Times New Roman', serif" font-size="28" font-style="italic" fill="#1F3FE0" font-weight="400">
+      A calm, opinionated workspace for GPT images.
+    </text>
+
+    <!-- Subtitle description -->
+    <text x="0" y="175" font-size="15" fill="#5C564E" line-height="1.6">
+      <tspan x="0" dy="0">Native macOS client for GPT image models. Full local control,</tspan>
+      <tspan x="0" dy="24">8 aspect ratios, 1K/2K/4K resolution, atomic prompt capsules,</tspan>
+      <tspan x="0" dy="24">isolated reference plates, and zero telemetry. You bring the Key.</tspan>
+    </text>
+
+    <!-- Feature Pills -->
+    <g transform="translate(0, 260)" font-size="13" font-weight="500">
+      <rect x="0" y="0" width="138" height="32" rx="6" fill="#FBFAF6" stroke="rgba(26,24,21,0.12)"/>
+      <text x="69" y="20" fill="#1A1815" text-anchor="middle">🖼 8 Aspect Ratios</text>
+
+      <rect x="146" y="0" width="132" height="32" rx="6" fill="#FBFAF6" stroke="rgba(26,24,21,0.12)"/>
+      <text x="212" y="20" fill="#1A1815" text-anchor="middle">📐 1K / 2K / 4K</text>
+
+      <rect x="286" y="0" width="154" height="32" rx="6" fill="#FBFAF6" stroke="rgba(26,24,21,0.12)"/>
+      <text x="363" y="20" fill="#1A1815" text-anchor="middle">🗂 Vault &amp; History</text>
+
+      <rect x="448" y="0" width="130" height="32" rx="6" fill="#FBFAF6" stroke="rgba(26,24,21,0.12)"/>
+      <text x="513" y="20" fill="#1A1815" text-anchor="middle">⚡ Single Flight</text>
+    </g>
+
+    <!-- Call to Actions -->
+    <g transform="translate(0, 320)">
+      <!-- Star Button -->
+      <rect x="0" y="0" width="190" height="48" rx="8" fill="#1F3FE0"/>
+      <text x="95" y="30" font-size="15" font-weight="700" fill="#FBFAF6" text-anchor="middle">★ Star on GitHub</text>
+
+      <!-- Download Button -->
+      <rect x="202" y="0" width="220" height="48" rx="8" fill="#FBFAF6" stroke="#1A1815" stroke-width="1.5"/>
+      <text x="312" y="30" font-size="15" font-weight="600" fill="#1A1815" text-anchor="middle">⬇ Download DMG (arm64)</text>
+
+      <!-- Free badge -->
+      <text x="438" y="30" font-size="13" font-weight="500" fill="#7A7368">100% Free · Direct to your Provider</text>
+    </g>
+
+    <!-- Proportional scaling note -->
+    <text x="0" y="415" font-size="12" font-family="ui-monospace,Menlo,monospace" fill="#8A8275">
+      NEW IN v0.3.2: Atomic capsules with 1-click delete · Adaptive fluid layout · Keyboard ref selection
+    </text>
+  </g>
+
+  <!-- Right Column: Mockup Window Presentation -->
+  <g transform="translate(680, 52)" filter="url(#shadow)">
+    <!-- Window Frame -->
+    <rect width="460" height="420" rx="12" fill="#FBFAF6" stroke="rgba(26,24,21,0.16)" stroke-width="1.5"/>
+
+    <!-- Traffic Lights -->
+    <circle cx="24" cy="22" r="5.5" fill="#EC6A5E"/>
+    <circle cx="42" cy="22" r="5.5" fill="#F4BF4F"/>
+    <circle cx="60" cy="22" r="5.5" fill="#61C554"/>
+    <text x="230" y="26" font-family="Georgia, serif" font-size="12" font-style="italic" fill="#8A8275" text-anchor="middle">
+      GPT Image · Studio Notebook
+    </text>
+    <line x1="0" y1="42" x2="460" y2="42" stroke="rgba(26,24,21,0.1)"/>
+
+    <!-- Prompt Box -->
+    <g transform="translate(20, 56)">
+      <rect width="420" height="106" rx="6" fill="#F4F1EA" stroke="rgba(26,24,21,0.14)"/>
+      <text x="14" y="24" font-size="11" font-family="ui-monospace,Menlo,monospace" font-weight="700" fill="#8A8275" letter-spacing="1">PROMPT / COMPOSER</text>
+
+      <!-- Text inside prompt with Capsules -->
+      <g transform="translate(14, 48)">
+        <text font-size="14" fill="#1A1815">
+          <tspan>Cinematic portrait of ceramic vase</tspan>
+        </text>
+
+        <!-- Skill Capsule -->
+        <g transform="translate(0, 14)">
+          <rect width="138" height="24" rx="12" fill="#E8ECE9" stroke="#2E7D43" stroke-width="1"/>
+          <text x="14" y="16" font-size="11" font-weight="600" fill="#2E7D43">◆ Minimalist Studio</text>
+          <text x="126" y="16" font-size="12" fill="#2E7D43" font-weight="700">×</text>
+        </g>
+
+        <!-- Ref Image Capsule -->
+        <g transform="translate(146, 14)">
+          <rect width="84" height="24" rx="4" fill="#EAEFFA" stroke="#1F3FE0" stroke-width="1"/>
+          <text x="10" y="16" font-size="11" font-weight="600" fill="#1F3FE0">@Plate 1</text>
+          <text x="72" y="16" font-size="12" fill="#1F3FE0" font-weight="700">×</text>
+        </g>
+      </g>
+    </g>
+
+    <!-- Format Bar Inside Window -->
+    <g transform="translate(20, 172)" font-size="11" font-family="ui-monospace,Menlo,monospace">
+      <!-- 16:9 Pill -->
+      <rect x="0" y="0" width="56" height="24" rx="4" fill="#1F3FE0"/>
+      <text x="28" y="16" fill="#FBFAF6" text-anchor="middle" font-weight="700">16:9</text>
+
+      <!-- 2K Pill -->
+      <rect x="62" y="0" width="46" height="24" rx="4" fill="#FBFAF6" stroke="rgba(26,24,21,0.2)"/>
+      <text x="85" y="16" fill="#1A1815" text-anchor="middle" font-weight="600">2K</text>
+
+      <!-- High Pill -->
+      <rect x="114" y="0" width="52" height="24" rx="4" fill="#FBFAF6" stroke="rgba(26,24,21,0.2)"/>
+      <text x="140" y="16" fill="#1A1815" text-anchor="middle">High</text>
+
+      <!-- Count Pill -->
+      <rect x="172" y="0" width="46" height="24" rx="4" fill="#FBFAF6" stroke="rgba(26,24,21,0.2)"/>
+      <text x="195" y="16" fill="#1A1815" text-anchor="middle">×1</text>
+
+      <!-- Generate Button Floats Right -->
+      <rect x="312" y="0" width="108" height="24" rx="4" fill="#1F3FE0"/>
+      <text x="366" y="16" fill="#FBFAF6" text-anchor="middle" font-weight="700">Generate ↵</text>
+    </g>
+
+    <!-- Output Preview Double-Framed Card -->
+    <g transform="translate(20, 208)">
+      <!-- Outer Card -->
+      <rect width="420" height="194" rx="6" fill="#F4F1EA" stroke="rgba(26,24,21,0.18)" stroke-width="1.5"/>
+
+      <!-- Inner Double-Border -->
+      <rect x="6" y="6" width="408" height="182" rx="4" fill="none" stroke="rgba(26,24,21,0.08)" stroke-width="1"/>
+
+      <!-- Simulated Art Visual: Warm Abstract Landscape -->
+      <g transform="translate(14, 14)">
+        <rect width="392" height="142" rx="3" fill="#E6DFD3"/>
+        <!-- Sun circle -->
+        <circle cx="196" cy="62" r="32" fill="#D34E2A" fill-opacity="0.85"/>
+        <!-- Mountain path -->
+        <path d="M 0 142 L 80 84 L 170 115 L 260 72 L 340 105 L 392 88 L 392 142 Z" fill="#2B3A4A"/>
+        <path d="M 0 142 L 110 102 L 210 128 L 310 94 L 392 120 L 392 142 Z" fill="#1F2833" fill-opacity="0.9"/>
+      </g>
+
+      <!-- Card Metadata Footer -->
+      <g transform="translate(18, 178)" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#6E675F">
+        <text x="0" y="0">16:9 · 2048×1152 · req-78e2 · 41s</text>
+        <text x="384" y="0" text-anchor="end" fill="#2E7D43" font-weight="700">COMPLETED ✓</text>
+      </g>
+    </g>
+  </g>
+</svg>

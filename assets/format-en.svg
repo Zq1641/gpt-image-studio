@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460" viewBox="0 0 1200 460" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif">
+  <!-- Background -->
+  <rect width="1200" height="460" fill="#F4F1EA"/>
+
+  <!-- Eyebrow & Title -->
+  <g transform="translate(60, 42)">
+    <text x="0" y="0" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="2">FORMAT &amp; SPECIFICATIONS</text>
+    <text x="0" y="28" font-family="Georgia, serif" font-size="24" font-weight="700" fill="#1A1815">
+      8 Aspect Ratios × 3 Resolutions × 3 Quality Tiers
+    </text>
+    <text x="0" y="52" font-size="14" fill="#6E675F">
+      Direct point-and-click control. Exact pixel math generated automatically — zero manual sizing calculations.
+    </text>
+  </g>
+
+  <!-- Row 1: 8 Visual Aspect Ratios (Proportionate Viewports) -->
+  <g transform="translate(60, 120)">
+    <!-- 21:9 -->
+    <g transform="translate(0, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="18" y="28" width="88" height="38" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">21:9</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">Cinematic</text>
+    </g>
+
+    <!-- 16:9 -->
+    <g transform="translate(136, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="22" y="24" width="80" height="45" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">16:9</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">Landscape</text>
+    </g>
+
+    <!-- 3:2 -->
+    <g transform="translate(272, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="26" y="23" width="72" height="48" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">3:2</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">35mm Classic</text>
+    </g>
+
+    <!-- 4:3 -->
+    <g transform="translate(408, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="30" y="22" width="64" height="48" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">4:3</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">Medium Format</text>
+    </g>
+
+    <!-- 1:1 (Active / Highlighted) -->
+    <g transform="translate(544, 0)">
+      <rect width="124" height="88" rx="8" fill="#1F3FE0"/>
+      <rect x="36" y="22" width="52" height="52" rx="3" fill="#FBFAF6" fill-opacity="0.2" stroke="#FBFAF6" stroke-width="2"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#FBFAF6" text-anchor="middle">1:1</text>
+      <text x="62" y="78" font-size="10" font-weight="600" fill="#FBFAF6" text-anchor="middle">Square · Social</text>
+    </g>
+
+    <!-- 3:4 -->
+    <g transform="translate(680, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="43" y="22" width="38" height="51" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">3:4</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">Portrait</text>
+    </g>
+
+    <!-- 2:3 -->
+    <g transform="translate(816, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="45" y="20" width="34" height="51" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">2:3</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">Classic Poster</text>
+    </g>
+
+    <!-- 9:16 -->
+    <g transform="translate(952, 0)">
+      <rect width="128" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="48" y="20" width="32" height="56" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="64" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">9:16</text>
+      <text x="64" y="78" font-size="10" fill="#8A8275" text-anchor="middle">Story · Mobile</text>
+    </g>
+  </g>
+
+  <!-- Row 2: 3 Parameter Cards -->
+  <g transform="translate(60, 230)">
+    <!-- Card 1: Resolution -->
+    <g transform="translate(0, 0)">
+      <rect width="344" height="128" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <text x="24" y="32" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="1">RESOLUTION TIERS</text>
+      <g transform="translate(24, 52)" font-size="13">
+        <text y="0" font-weight="700" fill="#1A1815">1K (1024px)</text>
+        <text x="100" y="0" fill="#6E675F">· Web preview &amp; rapid concepting</text>
+
+        <text y="24" font-weight="700" fill="#1A1815">2K (2048px)</text>
+        <text x="100" y="24" fill="#6E675F">· Studio master for retina screens</text>
+
+        <text y="48" font-weight="700" fill="#1F3FE0">4K (4096px)</text>
+        <text x="100" y="48" fill="#2E7D43" font-weight="600">· Exhibition print &amp; ultra detail</text>
+      </g>
+    </g>
+
+    <!-- Card 2: Quality -->
+    <g transform="translate(368, 0)">
+      <rect width="344" height="128" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <text x="24" y="32" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="1">QUALITY MODES</text>
+      <g transform="translate(24, 52)" font-size="13">
+        <text y="0" font-weight="700" fill="#1A1815">Low</text>
+        <text x="60" y="0" fill="#6E675F">· Fastest response, minimal token cost</text>
+
+        <text y="24" font-weight="700" fill="#1A1815">Medium</text>
+        <text x="60" y="24" fill="#6E675F">· Balanced clarity and rendering speed</text>
+
+        <text y="48" font-weight="700" fill="#1A1815">High</text>
+        <text x="60" y="48" fill="#1F3FE0" font-weight="600">· Deep textures, fine lighting &amp; fidelity</text>
+      </g>
+    </g>
+
+    <!-- Card 3: Batch Exploration -->
+    <g transform="translate(736, 0)">
+      <rect width="344" height="128" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <text x="24" y="32" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="1">BATCH GENERATION</text>
+      <g transform="translate(24, 52)" font-size="13">
+        <text y="0" font-weight="700" fill="#1A1815">×1 Plate</text>
+        <text x="76" y="0" fill="#6E675F">· Single deliberate composition</text>
+
+        <text y="24" font-weight="700" fill="#1A1815">×2 Plates</text>
+        <text x="76" y="24" fill="#6E675F">· Dual angle / lighting variations</text>
+
+        <text y="48" font-weight="700" fill="#1A1815">×4 Plates</text>
+        <text x="76" y="48" fill="#1F3FE0" font-weight="600">· Full creative spread exploration</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Bottom Terminal Guarantee Bar -->
+  <g transform="translate(60, 380)">
+    <rect width="1080" height="44" rx="6" fill="#1A1815"/>
+    <text x="24" y="27" font-family="ui-monospace,Menlo,monospace" font-size="12" fill="#FBFAF6">
+      $ Exact pixel negotiation (size + aspect_ratio) · 20MB image guard · Single-flight mutex
+    </text>
+  </g>
+</svg>

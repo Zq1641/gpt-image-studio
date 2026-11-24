@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue','PingFang SC','Microsoft YaHei',sans-serif">
+  <!-- Background -->
+  <rect width="1200" height="440" fill="#F4F1EA"/>
+
+  <!-- Eyebrow & Title -->
+  <g transform="translate(60, 42)">
+    <text x="0" y="0" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="2">全链路端到端闭环</text>
+    <text x="0" y="28" font-family="'Songti SC','Source Han Serif SC',Georgia,serif" font-size="24" font-weight="700" fill="#1A1815">
+      Studio 五步创作工作流
+    </text>
+    <text x="0" y="52" font-size="14" fill="#6E675F">
+      专为创意聚焦设计：从结构化提示词编写到本地归档，全流程单次闭环直达。
+    </text>
+  </g>
+
+  <!-- 5 Step Cards Flow -->
+  <g transform="translate(60, 120)">
+    <!-- Connecting Track Line -->
+    <line x1="80" y1="90" x2="1000" y2="90" stroke="rgba(31,63,224,0.25)" stroke-width="3" stroke-dasharray="6 4"/>
+
+    <!-- Step 1: 构思撰写 -->
+    <g transform="translate(0, 0)">
+      <rect width="200" height="190" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <circle cx="100" cy="38" r="18" fill="#1F3FE0" fill-opacity="0.1"/>
+      <text x="100" y="44" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700" fill="#1F3FE0" text-anchor="middle">01</text>
+      <text x="100" y="80" font-family="'Songti SC','Source Han Serif SC',Georgia,serif" font-size="16" font-weight="700" fill="#1A1815" text-anchor="middle">构思与撰写</text>
+      <line x1="30" y1="94" x2="170" y2="94" stroke="rgba(26,24,21,0.08)"/>
+      <text x="100" y="118" font-size="12" fill="#5C564E" text-anchor="middle">5 种原生预设模板</text>
+      <text x="100" y="136" font-size="11" fill="#8A8275" text-anchor="middle">六段式结构化提示词</text>
+      <text x="100" y="154" font-size="11" fill="#8A8275" text-anchor="middle">具体锚定词描述法</text>
+    </g>
+
+    <!-- Step 2: 规格设定 -->
+    <g transform="translate(220, 0)">
+      <rect width="200" height="190" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <circle cx="100" cy="38" r="18" fill="#1F3FE0" fill-opacity="0.1"/>
+      <text x="100" y="44" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700" fill="#1F3FE0" text-anchor="middle">02</text>
+      <text x="100" y="80" font-family="'Songti SC','Source Han Serif SC',Georgia,serif" font-size="16" font-weight="700" fill="#1A1815" text-anchor="middle">点选规格</text>
+      <line x1="30" y1="94" x2="170" y2="94" stroke="rgba(26,24,21,0.08)"/>
+      <text x="100" y="118" font-size="12" fill="#5C564E" text-anchor="middle">8 种完整画幅比例</text>
+      <text x="100" y="136" font-size="11" fill="#8A8275" text-anchor="middle">1K / 2K / 4K 分辨率</text>
+      <text x="100" y="154" font-size="11" fill="#8A8275" text-anchor="middle">质量等级与生成张数</text>
+    </g>
+
+    <!-- Step 3: 胶囊与引用 -->
+    <g transform="translate(440, 0)">
+      <rect width="200" height="190" rx="8" fill="#FBFAF6" stroke="#1F3FE0" stroke-width="1.5"/>
+      <circle cx="100" cy="38" r="18" fill="#1F3FE0"/>
+      <text x="100" y="44" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700" fill="#FBFAF6" text-anchor="middle">03</text>
+      <text x="100" y="80" font-family="'Songti SC','Source Han Serif SC',Georgia,serif" font-size="16" font-weight="700" fill="#1F3FE0" text-anchor="middle">胶囊与引用</text>
+      <line x1="30" y1="94" x2="170" y2="94" stroke="rgba(26,24,21,0.08)"/>
+      <text x="100" y="118" font-size="12" font-weight="600" fill="#1A1815" text-anchor="middle">@底图 与 ⟦技能⟧</text>
+      <text x="100" y="136" font-size="11" fill="#5C564E" text-anchor="middle">独立原子实体隔离</text>
+      <text x="100" y="154" font-size="11" fill="#2E7D43" text-anchor="middle">一键 '×' 快速删除</text>
+    </g>
+
+    <!-- Step 4: 单次生成 -->
+    <g transform="translate(660, 0)">
+      <rect width="200" height="190" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <circle cx="100" cy="38" r="18" fill="#1F3FE0" fill-opacity="0.1"/>
+      <text x="100" y="44" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700" fill="#1F3FE0" text-anchor="middle">04</text>
+      <text x="100" y="80" font-family="'Songti SC','Source Han Serif SC',Georgia,serif" font-size="16" font-weight="700" fill="#1A1815" text-anchor="middle">单次生成</text>
+      <line x1="30" y1="94" x2="170" y2="94" stroke="rgba(26,24,21,0.08)"/>
+      <text x="100" y="118" font-size="12" fill="#5C564E" text-anchor="middle">全局互斥防连击锁</text>
+      <text x="100" y="136" font-size="11" fill="#8A8275" text-anchor="middle">10 分钟超长轮询守护</text>
+      <text x="100" y="154" font-size="11" fill="#8A8275" text-anchor="middle">随时可中止操作</text>
+    </g>
+
+    <!-- Step 5: 本机归档与回填 -->
+    <g transform="translate(880, 0)">
+      <rect width="200" height="190" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <circle cx="100" cy="38" r="18" fill="#1F3FE0" fill-opacity="0.1"/>
+      <text x="100" y="44" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700" fill="#1F3FE0" text-anchor="middle">05</text>
+      <text x="100" y="80" font-family="'Songti SC','Source Han Serif SC',Georgia,serif" font-size="16" font-weight="700" fill="#1A1815" text-anchor="middle">归档与回填</text>
+      <line x1="30" y1="94" x2="170" y2="94" stroke="rgba(26,24,21,0.08)"/>
+      <text x="100" y="118" font-size="12" fill="#2E7D43" font-weight="600" text-anchor="middle">全量历史完整留存</text>
+      <text x="100" y="136" font-size="11" fill="#5C564E" text-anchor="middle">一键回填至输入框</text>
+      <text x="100" y="154" font-size="11" fill="#8A8275" text-anchor="middle">按需安全清理缓存</text>
+    </g>
+  </g>
+
+  <!-- Bottom Tip Banner -->
+  <g transform="translate(60, 350)">
+    <rect width="1080" height="48" rx="6" fill="#FBFAF6" stroke="rgba(26,24,21,0.12)"/>
+    <text x="24" y="29" font-family="ui-monospace,Menlo,monospace" font-size="12" fill="#5C564E">
+      💡 提示：历史记录完整留存提示词全文、分辨率、画幅比、模型参数及参考图快照，全部保存在本地磁盘。
+    </text>
+  </g>
+</svg>

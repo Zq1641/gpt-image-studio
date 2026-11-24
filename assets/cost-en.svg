@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460" viewBox="0 0 1200 460" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif">
+  <!-- Background -->
+  <rect width="1200" height="460" fill="#F4F1EA"/>
+
+  <!-- Eyebrow & Title -->
+  <g transform="translate(60, 40)">
+    <text x="0" y="0" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="2">COST TRANSPARENCY &amp; LOCAL PRIVACY</text>
+    <text x="0" y="28" font-family="Georgia, serif" font-size="24" font-weight="700" fill="#1A1815">
+      Direct Provider Billing · Zero Platform Fee · 100% Local Vault
+    </text>
+    <text x="0" y="52" font-size="14" fill="#6E675F">
+      No middleman subscriptions, no telemetry, no cloud lock-in. Your API keys and creations stay strictly on your device.
+    </text>
+  </g>
+
+  <!-- 3 Main Pillars -->
+  <g transform="translate(60, 116)">
+    <!-- Column 1: Zero Platform Toll -->
+    <g transform="translate(0, 0)">
+      <rect width="344" height="230" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="20" y="20" width="304" height="32" rx="4" fill="rgba(46,125,67,0.08)"/>
+      <text x="32" y="41" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#2E7D43">ZERO PLATFORM TOLL</text>
+      
+      <text x="20" y="85" font-family="ui-monospace,Menlo,monospace" font-size="36" font-weight="700" fill="#1A1815">¥0.00</text>
+      <text x="145" y="85" font-size="13" fill="#8A8275">/ monthly subscription</text>
+
+      <text x="20" y="115" font-size="13" font-weight="600" fill="#1A1815">Direct BYOK Model (Bring-Your-Own-Key)</text>
+      <text x="20" y="136" font-size="12" fill="#5C564E">• Real billing: ~¥0.05 / image directly to provider</text>
+      <text x="20" y="156" font-size="12" fill="#5C564E">• Works with OpenAI Official or any custom Relay API</text>
+      <text x="20" y="176" font-size="12" fill="#5C564E">• Pay only for what you generate, no tiered markup</text>
+      
+      <line x1="20" y1="195" x2="324" y2="195" stroke="rgba(26,24,21,0.08)"/>
+      <text x="20" y="213" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1F3FE0">✓ Verifiable Provider Invoices</text>
+    </g>
+
+    <!-- Column 2: 100% Local Privacy Vault -->
+    <g transform="translate(368, 0)">
+      <rect width="344" height="230" rx="8" fill="#FBFAF6" stroke="#1F3FE0" stroke-width="1.5"/>
+      <rect x="20" y="20" width="304" height="32" rx="4" fill="rgba(31,63,224,0.08)"/>
+      <text x="32" y="41" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1F3FE0">100% LOCAL VAULT</text>
+      
+      <text x="20" y="85" font-family="ui-monospace,Menlo,monospace" font-size="36" font-weight="700" fill="#1F3FE0">0 KB</text>
+      <text x="125" y="85" font-size="13" fill="#8A8275">uploaded to our servers</text>
+
+      <text x="20" y="115" font-size="13" font-weight="600" fill="#1A1815">Local-First Storage Architecture</text>
+      <text x="20" y="136" font-size="12" fill="#5C564E">• API keys stored securely in local app sandbox</text>
+      <text x="20" y="156" font-size="12" fill="#5C564E">• Full prompt &amp; reference image history on disk</text>
+      <text x="20" y="176" font-size="12" fill="#5C564E">• Zero analytics, tracking pixels, or telemetry</text>
+      
+      <line x1="20" y1="195" x2="324" y2="195" stroke="rgba(26,24,21,0.08)"/>
+      <text x="20" y="213" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#2E7D43">✓ Complete Data Ownership</text>
+    </g>
+
+    <!-- Column 3: Native Performance & Freedom -->
+    <g transform="translate(736, 0)">
+      <rect width="344" height="230" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="20" y="20" width="304" height="32" rx="4" fill="rgba(184,80,24,0.08)"/>
+      <text x="32" y="41" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#B85018">NATIVE MACOS BUILD</text>
+      
+      <text x="20" y="85" font-family="ui-monospace,Menlo,monospace" font-size="36" font-weight="700" fill="#1A1815">ARM64</text>
+      <text x="175" y="85" font-size="13" fill="#8A8275">Apple Silicon Native</text>
+
+      <text x="20" y="115" font-size="13" font-weight="600" fill="#1A1815">Hardware-Accelerated Studio UI</text>
+      <text x="20" y="136" font-size="12" fill="#5C564E">• Instant startup &amp; smooth proportional zooming</text>
+      <text x="20" y="156" font-size="12" fill="#5C564E">• Electron 34 + React 18 + TypeScript</text>
+      <text x="20" y="176" font-size="12" fill="#5C564E">• Single-flight request mutex with 10m keep-alive</text>
+      
+      <line x1="20" y1="195" x2="324" y2="195" stroke="rgba(26,24,21,0.08)"/>
+      <text x="20" y="213" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1A1815">✓ Standalone Offline-Ready Bundle</text>
+    </g>
+  </g>
+
+  <!-- Bottom Platform Status Matrix -->
+  <g transform="translate(60, 370)">
+    <rect width="1080" height="52" rx="6" fill="#FBFAF6" stroke="rgba(26,24,21,0.12)"/>
+    <text x="20" y="31" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#6E675F">PLATFORM COMPATIBILITY:</text>
+
+    <!-- macOS Apple Silicon -->
+    <g transform="translate(230, 14)">
+      <rect width="210" height="24" rx="4" fill="rgba(46,125,67,0.1)"/>
+      <text x="10" y="16" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#2E7D43">● macOS Apple Silicon (v0.3.2)</text>
+    </g>
+
+    <!-- macOS Intel -->
+    <g transform="translate(460, 14)">
+      <rect width="180" height="24" rx="4" fill="rgba(31,63,224,0.08)"/>
+      <text x="10" y="16" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1F3FE0">○ macOS Intel (Next)</text>
+    </g>
+
+    <!-- Windows -->
+    <g transform="translate(660, 14)">
+      <rect width="180" height="24" rx="4" fill="rgba(26,24,21,0.05)"/>
+      <text x="10" y="16" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6E675F">○ Windows x64 (Roadmap)</text>
+    </g>
+
+    <!-- Linux -->
+    <g transform="translate(860, 14)">
+      <rect width="180" height="24" rx="4" fill="rgba(26,24,21,0.05)"/>
+      <text x="10" y="16" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6E675F">○ Linux AppImage (Roadmap)</text>
+    </g>
+  </g>
+</svg>

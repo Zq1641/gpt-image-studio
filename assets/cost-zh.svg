@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460" viewBox="0 0 1200 460" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue','PingFang SC','Microsoft YaHei',sans-serif">
+  <!-- Background -->
+  <rect width="1200" height="460" fill="#F4F1EA"/>
+
+  <!-- Eyebrow & Title -->
+  <g transform="translate(60, 40)">
+    <text x="0" y="0" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="2">透明成本与本地隐私保险库</text>
+    <text x="0" y="28" font-family="'Songti SC','Source Han Serif SC',Georgia,serif" font-size="24" font-weight="700" fill="#1A1815">
+      直连服务商账单 · 平台零抽成 · 100% 数据归属本机
+    </text>
+    <text x="0" y="52" font-size="14" fill="#6E675F">
+      无按月会员门槛，无数据上报，无云端绑架。您的 API 密钥与生图资产始终牢牢保留在自己的电脑上。
+    </text>
+  </g>
+
+  <!-- 3 Main Pillars -->
+  <g transform="translate(60, 116)">
+    <!-- Column 1: Zero Platform Toll -->
+    <g transform="translate(0, 0)">
+      <rect width="344" height="230" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="20" y="20" width="304" height="32" rx="4" fill="rgba(46,125,67,0.08)"/>
+      <text x="32" y="41" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#2E7D43">平台零加价 / 零抽成</text>
+      
+      <text x="20" y="85" font-family="ui-monospace,Menlo,monospace" font-size="36" font-weight="700" fill="#1A1815">¥0.00</text>
+      <text x="145" y="85" font-size="13" fill="#8A8275">/ 月度订阅费用</text>
+
+      <text x="20" y="115" font-size="13" font-weight="600" fill="#1A1815">自带 Key 纯直连模式（BYOK）</text>
+      <text x="20" y="136" font-size="12" fill="#5C564E">• 真实开销：单张均价仅约 ¥0.05 左右</text>
+      <text x="20" y="156" font-size="12" fill="#5C564E">• 支持 OpenAI 官方直连或任意中转站 API</text>
+      <text x="20" y="176" font-size="12" fill="#5C564E">• 账单明细可查，无任何隐藏加价费率</text>
+      
+      <line x1="20" y1="195" x2="324" y2="195" stroke="rgba(26,24,21,0.08)"/>
+      <text x="20" y="213" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1F3FE0">✓ 真实账单可与中转后台核对</text>
+    </g>
+
+    <!-- Column 2: 100% Local Privacy Vault -->
+    <g transform="translate(368, 0)">
+      <rect width="344" height="230" rx="8" fill="#FBFAF6" stroke="#1F3FE0" stroke-width="1.5"/>
+      <rect x="20" y="20" width="304" height="32" rx="4" fill="rgba(31,63,224,0.08)"/>
+      <text x="32" y="41" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1F3FE0">100% 本地离线隐私安全</text>
+      
+      <text x="20" y="85" font-family="ui-monospace,Menlo,monospace" font-size="36" font-weight="700" fill="#1F3FE0">0 KB</text>
+      <text x="125" y="85" font-size="13" fill="#8A8275">上传到任何第三方服务器</text>
+
+      <text x="20" y="115" font-size="13" font-weight="600" fill="#1A1815">本地优先存储架构</text>
+      <text x="20" y="136" font-size="12" fill="#5C564E">• API Key 仅加密保存在 macOS 本地沙盒</text>
+      <text x="20" y="156" font-size="12" fill="#5C564E">• 提示词全文与参考图快照完整留存硬盘</text>
+      <text x="20" y="176" font-size="12" fill="#5C564E">• 无任何统计上报打点，无遥测追踪行为</text>
+      
+      <line x1="20" y1="195" x2="324" y2="195" stroke="rgba(26,24,21,0.08)"/>
+      <text x="20" y="213" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#2E7D43">✓ 完整数据所有权归您所有</text>
+    </g>
+
+    <!-- Column 3: Native Performance & Freedom -->
+    <g transform="translate(736, 0)">
+      <rect width="344" height="230" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="20" y="20" width="304" height="32" rx="4" fill="rgba(184,80,24,0.08)"/>
+      <text x="32" y="41" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#B85018">原生 MACOS 架构调优</text>
+      
+      <text x="20" y="85" font-family="ui-monospace,Menlo,monospace" font-size="36" font-weight="700" fill="#1A1815">ARM64</text>
+      <text x="175" y="85" font-size="13" fill="#8A8275">Apple 芯片原生构建</text>
+
+      <text x="20" y="115" font-size="13" font-weight="600" fill="#1A1815">硬件加速 Studio 界面体验</text>
+      <text x="20" y="136" font-size="12" fill="#5C564E">• 秒级冷启动与窗口等比例响应缩放</text>
+      <text x="20" y="156" font-size="12" fill="#5C564E">• Electron 34 + React 18 + TypeScript</text>
+      <text x="20" y="176" font-size="12" fill="#5C564E">• 单飞防重发互斥锁与 10 分钟长轮询保活</text>
+      
+      <line x1="20" y1="195" x2="324" y2="195" stroke="rgba(26,24,21,0.08)"/>
+      <text x="20" y="213" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1A1815">✓ 开箱即用绿色离线应用</text>
+    </g>
+  </g>
+
+  <!-- Bottom Platform Status Matrix -->
+  <g transform="translate(60, 370)">
+    <rect width="1080" height="52" rx="6" fill="#FBFAF6" stroke="rgba(26,24,21,0.12)"/>
+    <text x="20" y="31" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#6E675F">跨平台支持规划：</text>
+
+    <!-- macOS Apple Silicon -->
+    <g transform="translate(230, 14)">
+      <rect width="210" height="24" rx="4" fill="rgba(46,125,67,0.1)"/>
+      <text x="10" y="16" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#2E7D43">● macOS Apple 芯片 (v0.3.2)</text>
+    </g>
+
+    <!-- macOS Intel -->
+    <g transform="translate(460, 14)">
+      <rect width="180" height="24" rx="4" fill="rgba(31,63,224,0.08)"/>
+      <text x="10" y="16" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#1F3FE0">○ macOS Intel (计划中)</text>
+    </g>
+
+    <!-- Windows -->
+    <g transform="translate(660, 14)">
+      <rect width="180" height="24" rx="4" fill="rgba(26,24,21,0.05)"/>
+      <text x="10" y="16" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6E675F">○ Windows x64 (规划中)</text>
+    </g>
+
+    <!-- Linux -->
+    <g transform="translate(860, 14)">
+      <rect width="180" height="24" rx="4" fill="rgba(26,24,21,0.05)"/>
+      <text x="10" y="16" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#6E675F">○ Linux AppImage (规划中)</text>
+    </g>
+  </g>
+</svg>

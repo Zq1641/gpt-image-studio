@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif">
+  <!-- Background -->
+  <rect width="1200" height="440" fill="#F4F1EA"/>
+
+  <!-- Eyebrow & Title -->
+  <g transform="translate(60, 42)">
+    <text x="0" y="0" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="2">END-TO-END PIPELINE</text>
+    <text x="0" y="28" font-family="Georgia, serif" font-size="24" font-weight="700" fill="#1A1815">
+      The 5-Step Studio Creative Workflow
+    </text>
+    <text x="0" y="52" font-size="14" fill="#6E675F">
+      Designed for creative focus: from structured drafting to local archiving in a single deliberate loop.
+    </text>
+  </g>
+
+  <!-- 5 Step Cards Flow -->
+  <g transform="translate(60, 120)">
+    <!-- Connecting Track Line -->
+    <line x1="80" y1="90" x2="1000" y2="90" stroke="rgba(31,63,224,0.25)" stroke-width="3" stroke-dasharray="6 4"/>
+
+    <!-- Step 1: Compose -->
+    <g transform="translate(0, 0)">
+      <rect width="200" height="190" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <circle cx="100" cy="38" r="18" fill="#1F3FE0" fill-opacity="0.1"/>
+      <text x="100" y="44" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700" fill="#1F3FE0" text-anchor="middle">01</text>
+      <text x="100" y="80" font-family="Georgia, serif" font-size="16" font-weight="700" fill="#1A1815" text-anchor="middle">Compose</text>
+      <line x1="30" y1="94" x2="170" y2="94" stroke="rgba(26,24,21,0.08)"/>
+      <text x="100" y="118" font-size="12" fill="#5C564E" text-anchor="middle">5 Built-in Archetypes</text>
+      <text x="100" y="136" font-size="11" fill="#8A8275" text-anchor="middle">6-Part Technical Prompt</text>
+      <text x="100" y="154" font-size="11" fill="#8A8275" text-anchor="middle">Concrete Anchor Words</text>
+    </g>
+
+    <!-- Step 2: Format -->
+    <g transform="translate(220, 0)">
+      <rect width="200" height="190" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <circle cx="100" cy="38" r="18" fill="#1F3FE0" fill-opacity="0.1"/>
+      <text x="100" y="44" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700" fill="#1F3FE0" text-anchor="middle">02</text>
+      <text x="100" y="80" font-family="Georgia, serif" font-size="16" font-weight="700" fill="#1A1815" text-anchor="middle">Format</text>
+      <line x1="30" y1="94" x2="170" y2="94" stroke="rgba(26,24,21,0.08)"/>
+      <text x="100" y="118" font-size="12" fill="#5C564E" text-anchor="middle">8 Aspect Ratios</text>
+      <text x="100" y="136" font-size="11" fill="#8A8275" text-anchor="middle">1K / 2K / 4K Resolution</text>
+      <text x="100" y="154" font-size="11" fill="#8A8275" text-anchor="middle">Quality &amp; Batch Count</text>
+    </g>
+
+    <!-- Step 3: Capsules -->
+    <g transform="translate(440, 0)">
+      <rect width="200" height="190" rx="8" fill="#FBFAF6" stroke="#1F3FE0" stroke-width="1.5"/>
+      <circle cx="100" cy="38" r="18" fill="#1F3FE0"/>
+      <text x="100" y="44" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700" fill="#FBFAF6" text-anchor="middle">03</text>
+      <text x="100" y="80" font-family="Georgia, serif" font-size="16" font-weight="700" fill="#1F3FE0" text-anchor="middle">Capsules &amp; Refs</text>
+      <line x1="30" y1="94" x2="170" y2="94" stroke="rgba(26,24,21,0.08)"/>
+      <text x="100" y="118" font-size="12" font-weight="600" fill="#1A1815" text-anchor="middle">@Plate &amp; ⟦Skill⟧</text>
+      <text x="100" y="136" font-size="11" fill="#5C564E" text-anchor="middle">Atomic Unit Isolation</text>
+      <text x="100" y="154" font-size="11" fill="#2E7D43" text-anchor="middle">1-Click '×' Deletion</text>
+    </g>
+
+    <!-- Step 4: Generate -->
+    <g transform="translate(660, 0)">
+      <rect width="200" height="190" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <circle cx="100" cy="38" r="18" fill="#1F3FE0" fill-opacity="0.1"/>
+      <text x="100" y="44" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700" fill="#1F3FE0" text-anchor="middle">04</text>
+      <text x="100" y="80" font-family="Georgia, serif" font-size="16" font-weight="700" fill="#1A1815" text-anchor="middle">Generate</text>
+      <line x1="30" y1="94" x2="170" y2="94" stroke="rgba(26,24,21,0.08)"/>
+      <text x="100" y="118" font-size="12" fill="#5C564E" text-anchor="middle">Single-Flight Mutex</text>
+      <text x="100" y="136" font-size="11" fill="#8A8275" text-anchor="middle">10-Min Timeout Guard</text>
+      <text x="100" y="154" font-size="11" fill="#8A8275" text-anchor="middle">Instant Cancel Button</text>
+    </g>
+
+    <!-- Step 5: Archive -->
+    <g transform="translate(880, 0)">
+      <rect width="200" height="190" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <circle cx="100" cy="38" r="18" fill="#1F3FE0" fill-opacity="0.1"/>
+      <text x="100" y="44" font-family="ui-monospace,Menlo,monospace" font-size="14" font-weight="700" fill="#1F3FE0" text-anchor="middle">05</text>
+      <text x="100" y="80" font-family="Georgia, serif" font-size="16" font-weight="700" fill="#1A1815" text-anchor="middle">Vault &amp; Refill</text>
+      <line x1="30" y1="94" x2="170" y2="94" stroke="rgba(26,24,21,0.08)"/>
+      <text x="100" y="118" font-size="12" fill="#2E7D43" font-weight="600" text-anchor="middle">Full History Saved</text>
+      <text x="100" y="136" font-size="11" fill="#5C564E" text-anchor="middle">1-Click Prompt Refill</text>
+      <text x="100" y="154" font-size="11" fill="#8A8275" text-anchor="middle">Selective Cache Janitor</text>
+    </g>
+  </g>
+
+  <!-- Bottom Tip Banner -->
+  <g transform="translate(60, 350)">
+    <rect width="1080" height="48" rx="6" fill="#FBFAF6" stroke="rgba(26,24,21,0.12)"/>
+    <text x="24" y="29" font-family="ui-monospace,Menlo,monospace" font-size="12" fill="#5C564E">
+      💡 Tip: History retains entire prompt text, resolution, aspect ratio, model, and reference image snapshots on local disk.
+    </text>
+  </g>
+</svg>

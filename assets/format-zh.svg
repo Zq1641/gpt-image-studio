@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460" viewBox="0 0 1200 460" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei','Helvetica Neue',sans-serif">
+  <!-- Background -->
+  <rect width="1200" height="460" fill="#F4F1EA"/>
+
+  <!-- Eyebrow & Title -->
+  <g transform="translate(60, 42)">
+    <text x="0" y="0" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="2">画幅规格控制 / FORMAT MATRIX</text>
+    <text x="0" y="28" font-family="Georgia, serif" font-size="24" font-weight="700" fill="#1A1815">
+      8 种构图画幅 × 3 档超清分辨率 × 3 档渲染质量
+    </text>
+    <text x="0" y="52" font-size="14" fill="#6E675F">
+      面板点选即用。底层代码自动换算像素规格（size + aspect_ratio）发送，告别手动折腾尺寸。
+    </text>
+  </g>
+
+  <!-- Row 1: 8 Visual Aspect Ratios (Proportionate Viewports) -->
+  <g transform="translate(60, 120)">
+    <!-- 21:9 -->
+    <g transform="translate(0, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="18" y="28" width="88" height="38" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5" stroke-dasharray="3 2"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">21:9</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">电影宽银幕</text>
+    </g>
+
+    <!-- 16:9 -->
+    <g transform="translate(136, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="22" y="24" width="80" height="45" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">16:9</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">常规横屏视频</text>
+    </g>
+
+    <!-- 3:2 -->
+    <g transform="translate(272, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="26" y="23" width="72" height="48" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">3:2</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">35mm 胶片经典</text>
+    </g>
+
+    <!-- 4:3 -->
+    <g transform="translate(408, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="30" y="22" width="64" height="48" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">4:3</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">中画幅监看</text>
+    </g>
+
+    <!-- 1:1 (Active / Highlighted) -->
+    <g transform="translate(544, 0)">
+      <rect width="124" height="88" rx="8" fill="#1F3FE0"/>
+      <rect x="36" y="22" width="52" height="52" rx="3" fill="#FBFAF6" fill-opacity="0.2" stroke="#FBFAF6" stroke-width="2"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#FBFAF6" text-anchor="middle">1:1</text>
+      <text x="62" y="78" font-size="10" font-weight="600" fill="#FBFAF6" text-anchor="middle">方画幅 · 头像</text>
+    </g>
+
+    <!-- 3:4 -->
+    <g transform="translate(680, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="43" y="22" width="38" height="51" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">3:4</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">经典人像画幅</text>
+    </g>
+
+    <!-- 2:3 -->
+    <g transform="translate(816, 0)">
+      <rect width="124" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="45" y="20" width="34" height="51" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="62" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">2:3</text>
+      <text x="62" y="78" font-size="10" fill="#8A8275" text-anchor="middle">标准竖版海报</text>
+    </g>
+
+    <!-- 9:16 -->
+    <g transform="translate(952, 0)">
+      <rect width="128" height="88" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <rect x="48" y="20" width="32" height="56" rx="2" fill="none" stroke="#5C564E" stroke-width="1.5"/>
+      <text x="64" y="20" font-family="ui-monospace,Menlo,monospace" font-size="12" font-weight="700" fill="#1A1815" text-anchor="middle">9:16</text>
+      <text x="64" y="78" font-size="10" fill="#8A8275" text-anchor="middle">全屏故事 · 手机</text>
+    </g>
+  </g>
+
+  <!-- Row 2: 3 Parameter Cards -->
+  <g transform="translate(60, 230)">
+    <!-- Card 1: Resolution -->
+    <g transform="translate(0, 0)">
+      <rect width="344" height="128" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <text x="24" y="32" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="1">分辨率档位 / RESOLUTION</text>
+      <g transform="translate(24, 52)" font-size="13">
+        <text y="0" font-weight="700" fill="#1A1815">1K (1024px)</text>
+        <text x="100" y="0" fill="#6E675F">· 网页轻量预览，低成本快速验证</text>
+
+        <text y="24" font-weight="700" fill="#1A1815">2K (2048px)</text>
+        <text x="100" y="24" fill="#6E675F">· 视网膜屏母版，高精呈现细节</text>
+
+        <text y="48" font-weight="700" fill="#1F3FE0">4K (4096px)</text>
+        <text x="100" y="48" fill="#2E7D43" font-weight="600">· 展览级画质，海报与超清输出</text>
+      </g>
+    </g>
+
+    <!-- Card 2: Quality -->
+    <g transform="translate(368, 0)">
+      <rect width="344" height="128" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <text x="24" y="32" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="1">渲染质量 / QUALITY MODES</text>
+      <g transform="translate(24, 52)" font-size="13">
+        <text y="0" font-weight="700" fill="#1A1815">Low (经济)</text>
+        <text x="96" y="0" fill="#6E675F">· 响应最快，最小 Token 消耗</text>
+
+        <text y="24" font-weight="700" fill="#1A1815">Medium (标准)</text>
+        <text x="96" y="24" fill="#6E675F">· 均衡画质与出图速度的最佳平衡</text>
+
+        <text y="48" font-weight="700" fill="#1A1815">High (精细)</text>
+        <text x="96" y="48" fill="#1F3FE0" font-weight="600">· 丰富微纹理，光影渲染层次饱满</text>
+      </g>
+    </g>
+
+    <!-- Card 3: Batch Exploration -->
+    <g transform="translate(736, 0)">
+      <rect width="344" height="128" rx="8" fill="#FBFAF6" stroke="rgba(26,24,21,0.14)"/>
+      <text x="24" y="32" font-family="ui-monospace,Menlo,monospace" font-size="11" font-weight="700" fill="#1F3FE0" letter-spacing="1">批量生成 / BATCH EXP</text>
+      <g transform="translate(24, 52)" font-size="13">
+        <text y="0" font-weight="700" fill="#1A1815">×1 单张</text>
+        <text x="76" y="0" fill="#6E675F">· 专注单一构图打磨，克制扣费</text>
+
+        <text y="24" font-weight="700" fill="#1A1815">×2 双张</text>
+        <text x="76" y="24" fill="#6E675F">· 双角度与不同光影变体对比</text>
+
+        <text y="48" font-weight="700" fill="#1A1815">×4 四联</text>
+        <text x="76" y="48" fill="#1F3FE0" font-weight="600">· 一次出齐，全面激发灵感探索</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Bottom Terminal Guarantee Bar -->
+  <g transform="translate(60, 380)">
+    <rect width="1080" height="44" rx="6" fill="#1A1815"/>
+    <text x="24" y="27" font-family="ui-monospace,Menlo,monospace" font-size="12" fill="#FBFAF6">
+      $ 规格自动换算（size + aspect_ratio） · 参考图超 20MB 先行拦截 · 互斥单任务防连点
+    </text>
+  </g>
+</svg>
